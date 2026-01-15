@@ -280,9 +280,18 @@
                 setComment('');
             };
 
+            const viewUser = () => {
+                onViewProfile({
+                    uid: post.userId,
+                    name: post.username,
+                    photoURL: post.userPic,
+                    isVerified: post.isVerified
+                });
+            };
+
             return (
                 <div className="bg-white border border-slate-200 rounded-xl mb-6 overflow-hidden">
-                    <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => onViewProfile({ uid: post.userId })}>
+                    <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={viewUser}>
                         <img src={post.userPic || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover border" />
                         <span className="font-bold text-sm">{post.username}</span>
                         {post.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
@@ -298,7 +307,7 @@
                         </div>
                         <p className="text-sm font-bold mb-1">{post.likes?.length || 0} likes</p>
                         <div className="text-sm mb-2">
-                            <span className="font-bold mr-2 cursor-pointer" onClick={() => onViewProfile({ uid: post.userId })}>{post.username}</span>
+                            <span className="font-bold mr-2 cursor-pointer" onClick={viewUser}>{post.username}</span>
                             {post.caption}
                         </div>
                         {post.comments?.length > 0 && (
@@ -312,8 +321,10 @@
                             </div>
                         )}
                         <p className="text-[10px] text-slate-400 uppercase tracking-wide">{formatDateIST(post.timestamp)}</p>
+                        
                         <form onSubmit={handlePostComment} className="mt-3 flex items-center border-t pt-3">
-                            <input type="text" placeholder="Add a comment..." className="flex-1 text-sm outline-none" value={comment} onChange={e => setComment(e.target.value)} />
+                            <input type="text" placeholder="Add a comment..." className="flex-1 text-sm outline-none" 
+                                value={comment} onChange={e => setComment(e.target.value)} />
                             <button disabled={!comment.trim()} className="text-blue-500 text-sm font-bold disabled:opacity-50">Post</button>
                         </form>
                     </div>
@@ -329,7 +340,8 @@
 
             const handleFile = (e) => {
                 const file = e.target.files[0];
-                if(file && file.size < 2097152) {
+                if(file) {
+                    if(file.size > 2097152) return alert("Image too big (Max 2MB)");
                     const reader = new FileReader();
                     reader.onload = () => setImage(reader.result);
                     reader.readAsDataURL(file);
@@ -342,6 +354,7 @@
                 try {
                     const userDoc = await getDoc(doc(db, "users", user.uid));
                     const isVerified = userDoc.exists() ? userDoc.data().isVerified : false;
+
                     await addDoc(collection(db, "posts"), {
                         userId: user.uid,
                         username: user.displayName,
@@ -355,7 +368,7 @@
                     });
                     alert("Posted!");
                     onClose();
-                } catch(e) { alert("Error: " + e.message); }
+                } catch(e) { alert("Error posting: " + e.message); }
                 finally { setLoading(false); }
             };
 
@@ -1007,20 +1020,75 @@
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
+                let isMounted = true;
+                
+                // Add a safety timeout to prevent infinite loading
+                const safetyTimeout = setTimeout(() => {
+                    if (isMounted && loading) {
+                        console.warn("Loading timeout reached");
+                        setLoading(false);
+                    }
+                }, 5000); // 5 seconds safety timeout
+
                 const unsubAuth = onAuthStateChanged(auth, async (u) => {
                     if (u) {
                         setUser(u);
-                        const unsubDoc = onSnapshot(doc(db, "users", u.uid), (docSnap) => {
-                            if (docSnap.exists()) setUserData(docSnap.data());
-                        });
-                        return () => unsubDoc();
-                    } else { setUser(null); setUserData(null); }
-                    setLoading(false);
+                        // Fetch user data once on load
+                        try {
+                            const userDoc = await getDoc(doc(db, "users", u.uid));
+                            if (isMounted) {
+                                if (userDoc.exists()) {
+                                    const data = userDoc.data();
+                                    if (data.isBanned) {
+                                        alert("Your account has been disabled by the admin.");
+                                        signOut(auth);
+                                        setUser(null);
+                                        setUserData(null);
+                                    } else {
+                                        setUserData(data);
+                                    }
+                                }
+                                setLoading(false);
+                            }
+                            
+                            // Then set up real-time listener
+                            onSnapshot(doc(db, "users", u.uid), (docSnap) => {
+                                if (isMounted && docSnap.exists()) {
+                                    const data = docSnap.data();
+                                    if (data.isBanned) {
+                                        alert("Your account has been disabled by the admin.");
+                                        signOut(auth);
+                                    } else {
+                                        setUserData(data);
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            console.error("Error fetching user data:", e);
+                            if (isMounted) setLoading(false);
+                        }
+                    } else {
+                        if (isMounted) {
+                            setUser(null);
+                            setUserData(null);
+                            setLoading(false);
+                        }
+                    }
                 });
-                return () => unsubAuth();
+                
+                return () => {
+                    isMounted = false;
+                    clearTimeout(safetyTimeout);
+                    unsubAuth();
+                };
             }, []);
 
-            if (loading) return <div className="h-screen flex items-center justify-center"><div className="loader"></div></div>;
+            if (loading) return (
+                <div className="h-screen flex flex-col items-center justify-center">
+                    <h1 className="font-insta text-4xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 mb-4">Indiagram</h1>
+                    <div className="loader"></div>
+                </div>
+            );
 
             return user ? <Dashboard user={user} userData={userData} /> : <AuthPage setUser={setUser} />;
         }
