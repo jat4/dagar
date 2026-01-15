@@ -29,7 +29,7 @@
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         .blue-tick { color: #3b82f6; }
         
-        /* Loading Animation */
+        /* Optimized Loading Animation */
         .loader {
             border: 3px solid #f3f3f3;
             border-radius: 50%;
@@ -118,8 +118,11 @@
             if (!timestamp) return 'Offline';
             const date = new Date(timestamp.seconds * 1000);
             const now = new Date();
-            if (now - date < 120000) return 'Online';
-            return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
+            const diffMs = now - date;
+            if (diffMs < 120000) return 'Online'; // Online if active within last 2 mins
+            
+            // Format time if offline
+            return "Last seen " + date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
         };
 
         // --- COMPONENTS ---
@@ -269,9 +272,18 @@
         }
 
         // --- POST & MODALS ---
-        function PostCard({ post, currentUser, onLike, onComment, onShare, onViewProfile }) {
+        function PostCard({ post, currentUser, onLike, onComment, onShare, onViewProfile, onDelete }) {
             const [comment, setComment] = useState('');
             const isLiked = post.likes?.includes(currentUser.uid);
+            const [postUser, setPostUser] = useState(null);
+
+            // Fetch latest user data for blue tick and profile pic
+            useEffect(() => {
+                const unsub = onSnapshot(doc(db, "users", post.userId), (doc) => {
+                    if (doc.exists()) setPostUser(doc.data());
+                });
+                return () => unsub();
+            }, [post.userId]);
 
             const handlePostComment = (e) => {
                 e.preventDefault();
@@ -281,20 +293,29 @@
             };
 
             const viewUser = () => {
-                onViewProfile({
-                    uid: post.userId,
-                    name: post.username,
-                    photoURL: post.userPic,
-                    isVerified: post.isVerified
-                });
+                if (postUser) {
+                    onViewProfile({
+                        uid: postUser.uid,
+                        name: postUser.name,
+                        photoURL: postUser.photoURL,
+                        isVerified: postUser.isVerified
+                    });
+                }
             };
 
             return (
                 <div className="bg-white border border-slate-200 rounded-xl mb-6 overflow-hidden">
-                    <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={viewUser}>
-                        <img src={post.userPic || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover border" />
-                        <span className="font-bold text-sm">{post.username}</span>
-                        {post.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
+                    <div className="p-3 flex items-center justify-between">
+                        <div className="flex items-center gap-3 cursor-pointer" onClick={viewUser}>
+                            <img src={postUser?.photoURL || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover border" />
+                            <span className="font-bold text-sm">{postUser?.username || post.username}</span>
+                            {postUser?.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
+                        </div>
+                        {currentUser.uid === post.userId && (
+                            <button onClick={() => onDelete(post.id)} className="text-slate-400 hover:text-red-500">
+                                <span className="material-icons-round text-sm">delete</span>
+                            </button>
+                        )}
                     </div>
                     <img src={post.imageUrl} className="w-full object-cover max-h-[500px]" loading="lazy" />
                     <div className="p-3">
@@ -307,7 +328,7 @@
                         </div>
                         <p className="text-sm font-bold mb-1">{post.likes?.length || 0} likes</p>
                         <div className="text-sm mb-2">
-                            <span className="font-bold mr-2 cursor-pointer" onClick={viewUser}>{post.username}</span>
+                            <span className="font-bold mr-2 cursor-pointer" onClick={viewUser}>{postUser?.username || post.username}</span>
                             {post.caption}
                         </div>
                         {post.comments?.length > 0 && (
@@ -353,13 +374,10 @@
                 setLoading(true);
                 try {
                     const userDoc = await getDoc(doc(db, "users", user.uid));
-                    const isVerified = userDoc.exists() ? userDoc.data().isVerified : false;
-
+                    // We don't save redundant fields, fetch fresh on view
                     await addDoc(collection(db, "posts"), {
                         userId: user.uid,
-                        username: user.displayName,
-                        userPic: user.photoURL,
-                        isVerified: isVerified,
+                        username: user.displayName, // Fallback
                         imageUrl: image,
                         caption: caption,
                         likes: [],
@@ -454,6 +472,12 @@
                 }
             };
 
+            const handleDeletePost = async (postId) => {
+                if(confirm("Delete this post?")) {
+                    await deleteDoc(doc(db, "posts", postId));
+                }
+            };
+
             const handleShare = (post) => {
                 navigator.clipboard.writeText(`Check out this post: ${post.caption}`);
                 alert("Link copied!");
@@ -501,6 +525,7 @@
                                             onLike={handleLike} 
                                             onComment={handleComment}
                                             onShare={handleShare}
+                                            onDelete={handleDeletePost}
                                             onViewProfile={setViewingProfile}
                                         />
                                     ))
@@ -631,7 +656,7 @@
                                 <div className="flex items-center gap-3">
                                     <img src={u.photoURL || DEFAULT_AVATAR} className="w-12 h-12 rounded-full object-cover bg-slate-200" />
                                     <div>
-                                        <p className="text-sm font-bold">{u.name}</p>
+                                        <p className="text-sm font-bold">{u.name} {u.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</p>
                                         <p className="text-xs text-slate-500">Tap to chat</p>
                                     </div>
                                 </div>
@@ -836,8 +861,14 @@
             const [messages, setMessages] = useState([]);
             const [input, setInput] = useState('');
             const scrollRef = useRef();
+            const [fullUser, setFullUser] = useState(targetUser);
 
             useEffect(() => {
+                // Fetch real-time status of user
+                const unsubUser = onSnapshot(doc(db, "users", targetUser.uid), (doc) => {
+                    if (doc.exists()) setFullUser(doc.data());
+                });
+
                 const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
                 const q = query(collection(db, "messages"), where("chatId", "==", chatId));
                 const unsub = onSnapshot(q, (snap) => {
@@ -845,7 +876,7 @@
                     setMessages(msgs);
                     setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
                 });
-                return () => unsub();
+                return () => { unsub(); unsubUser(); }
             }, [targetUser]);
 
             const sendMessage = async (e) => {
@@ -854,25 +885,54 @@
                 const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
                 await addDoc(collection(db, "messages"), { chatId, text: input, senderId: currentUser.uid, timestamp: serverTimestamp() });
                 setInput('');
+                // Update my activity
+                updateDoc(doc(db, "users", currentUser.uid), { lastSeen: serverTimestamp() });
+            };
+
+            const deleteMessage = async (id) => { if(confirm("Unsend message?")) await deleteDoc(doc(db, "messages", id)); };
+
+            const deleteChat = async () => {
+                if(confirm("Delete entire conversation? This cannot be undone.")) {
+                    const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                    const q = query(collection(db, "messages"), where("chatId", "==", chatId));
+                    const snap = await getDocs(q);
+                    // Batch delete manually in loop
+                    snap.forEach(d => deleteDoc(d.ref));
+                    onBack();
+                }
             };
 
             return (
                 <div className="flex flex-col h-full bg-white">
-                    <div className="px-4 py-3 border-b flex items-center gap-3">
-                        <button onClick={onBack}><span className="material-icons-round">arrow_back</span></button>
-                        <img src={targetUser.photoURL || DEFAULT_AVATAR} className="w-8 h-8 rounded-full" />
-                        <h3 className="font-bold text-sm">{targetUser.name}</h3>
+                    <div className="px-4 py-3 border-b flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <button onClick={onBack}><span className="material-icons-round">arrow_back</span></button>
+                            <img src={fullUser.photoURL || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover" />
+                            <div>
+                                <h3 className="font-bold text-sm flex items-center gap-1">{fullUser.name} {fullUser.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</h3>
+                                <p className="text-[10px] text-green-500 font-bold">{formatLastSeen(fullUser.lastSeen)}</p>
+                            </div>
+                        </div>
+                        <button onClick={deleteChat} className="text-red-500 text-xs font-bold border border-red-100 px-2 py-1 rounded">Delete Chat</button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50">
                         {messages.map(msg => (
                             <div key={msg.id} className={`flex ${msg.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}`}>
-                                <div className={`px-4 py-2 rounded-2xl text-sm ${msg.senderId === currentUser.uid ? 'bg-blue-500 text-white' : 'bg-slate-100'}`}>{msg.text}</div>
+                                <div className={`max-w-[70%] flex flex-col ${msg.senderId === currentUser.uid ? 'items-end' : 'items-start'}`}>
+                                    <div 
+                                        onClick={() => msg.senderId === currentUser.uid && deleteMessage(msg.id)}
+                                        className={`px-4 py-2 rounded-2xl text-sm cursor-pointer hover:opacity-90 ${msg.senderId === currentUser.uid ? 'bg-blue-500 text-white' : 'bg-white text-slate-800 border'}`}
+                                    >
+                                        {msg.text}
+                                    </div>
+                                    <span className="text-[9px] text-slate-400 mt-1 px-1">{formatTimeIST(msg.timestamp)}</span>
+                                </div>
                             </div>
                         ))}
                         <div ref={scrollRef}></div>
                     </div>
-                    <form onSubmit={sendMessage} className="p-3 border-t flex gap-2">
-                        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Message..." className="flex-1 bg-slate-50 rounded-full px-4 text-sm outline-none" />
+                    <form onSubmit={sendMessage} className="p-3 border-t flex gap-2 bg-white">
+                        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Message..." className="flex-1 bg-slate-100 rounded-full px-4 text-sm outline-none" />
                         <button disabled={!input.trim()} className="text-blue-500 font-bold text-sm">Send</button>
                     </form>
                 </div>
@@ -1021,19 +1081,16 @@
 
             useEffect(() => {
                 let isMounted = true;
-                
-                // Add a safety timeout to prevent infinite loading
                 const safetyTimeout = setTimeout(() => {
                     if (isMounted && loading) {
                         console.warn("Loading timeout reached");
                         setLoading(false);
                     }
-                }, 5000); // 5 seconds safety timeout
+                }, 5000); 
 
                 const unsubAuth = onAuthStateChanged(auth, async (u) => {
                     if (u) {
                         setUser(u);
-                        // Fetch user data once on load
                         try {
                             const userDoc = await getDoc(doc(db, "users", u.uid));
                             if (isMounted) {
@@ -1046,12 +1103,13 @@
                                         setUserData(null);
                                     } else {
                                         setUserData(data);
+                                        // Update online status
+                                        updateDoc(doc(db, "users", u.uid), { lastSeen: serverTimestamp() });
                                     }
                                 }
                                 setLoading(false);
                             }
                             
-                            // Then set up real-time listener
                             onSnapshot(doc(db, "users", u.uid), (docSnap) => {
                                 if (isMounted && docSnap.exists()) {
                                     const data = docSnap.data();
@@ -1064,7 +1122,7 @@
                                 }
                             });
                         } catch (e) {
-                            console.error("Error fetching user data:", e);
+                            console.error("Error:", e);
                             if (isMounted) setLoading(false);
                         }
                     } else {
