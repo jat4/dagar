@@ -18,21 +18,42 @@
     <!-- Google Fonts & Icons -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Grand+Hotel&display=swap" rel="stylesheet">
     
     <style>
         body { font-family: 'Inter', sans-serif; background-color: #fafafa; }
+        .font-insta { font-family: 'Grand Hotel', cursive; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         .blue-tick { color: #3b82f6; }
+        
+        /* Loading Animation */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #a855f7;
+            width: 40px;
+            height: 40px;
+            -webkit-animation: spin 1s linear infinite; /* Safari */
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="text-slate-900 h-screen overflow-hidden">
 
-    <div id="root" class="h-full"></div>
+    <div id="root" class="h-full">
+        <div class="h-full flex flex-col items-center justify-center bg-white">
+            <h1 class="font-insta text-4xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 mb-4">Indiagram</h1>
+            <div class="loader"></div>
+        </div>
+    </div>
 
     <!-- Main Logic -->
     <script type="text/babel" data-type="module">
-        // --- IMPORTS ---
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { 
             getAuth, 
@@ -56,7 +77,9 @@
             deleteDoc, 
             setDoc, 
             updateDoc,
-            serverTimestamp 
+            serverTimestamp,
+            orderBy,
+            limit
         } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
         // --- CONFIGURATION ---
@@ -74,57 +97,71 @@
         const db = getFirestore(app);
         const { useState, useEffect, useRef } = React;
 
+        // Reliable Blank Avatar
+        const DEFAULT_AVATAR = "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png";
+
         // --- UTILS ---
         const formatTimeIST = (timestamp) => {
             if (!timestamp) return '';
             const date = new Date(timestamp.seconds * 1000);
-            return date.toLocaleTimeString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true
-            });
+            return date.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true });
         };
 
         const formatDateIST = (timestamp) => {
             if (!timestamp) return 'Recently';
             const date = new Date(timestamp.seconds * 1000);
-            return date.toLocaleDateString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                day: 'numeric', month: 'long', year: 'numeric'
-            });
+            return date.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'long', year: 'numeric' });
         };
 
         const formatLastSeen = (timestamp) => {
             if (!timestamp) return 'Offline';
             const date = new Date(timestamp.seconds * 1000);
             const now = new Date();
-            const diff = now - date;
-            if (diff < 120000) return 'Online';
-            return date.toLocaleString('en-IN', {
-                timeZone: 'Asia/Kolkata',
-                day: 'numeric', month: 'short',
-                hour: 'numeric', minute: '2-digit', hour12: true
-            });
+            if (now - date < 120000) return 'Online';
+            return date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
         };
 
         // --- COMPONENTS ---
 
-        // 1. Navigation Bar
-        function Navbar({ user, onLogout, setView }) {
+        function Navbar({ user, userData, onLogout, setView, activeView }) {
+            const photo = userData?.photoURL || user.photoURL || DEFAULT_AVATAR;
+            const [showSettings, setShowSettings] = useState(false);
+            
             return (
                 <nav className="bg-white border-b border-slate-200 h-16 flex items-center justify-between px-4 sticky top-0 z-50">
-                    <div className="flex items-center gap-2 font-bold text-2xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 cursor-pointer" style={{fontFamily: 'cursive'}} onClick={() => setView('friends')}>
-                        Indiagram
+                    <div className="flex items-center gap-3">
+                        {/* Settings Icon (Top Left) */}
+                        <div className="relative">
+                            <button onClick={() => setShowSettings(!showSettings)} className="text-slate-700 hover:text-black mt-1">
+                                <span className="material-icons-round text-2xl">settings</span>
+                            </button>
+                            {showSettings && (
+                                <div className="absolute top-10 left-0 bg-white border border-slate-200 shadow-lg rounded-lg w-40 py-2 z-[60] animate-fade-in">
+                                    <button onClick={onLogout} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-slate-50 flex items-center gap-2">
+                                        <span className="material-icons-round text-sm">logout</span> Logout
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        
+                        <div className="font-insta text-3xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 cursor-pointer pt-1" onClick={() => setView('feed')}>
+                            Indiagram
+                        </div>
                     </div>
+
                     {user && (
-                        <div className="flex items-center gap-3">
-                            <button onClick={() => setView('my_profile')} className="flex items-center gap-2 hover:bg-slate-100 p-1 pr-3 rounded-full transition group">
-                                <img 
-                                    src={user.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid} 
-                                    className="w-8 h-8 rounded-full border border-slate-300 object-cover group-hover:border-purple-500 transition" 
-                                    alt="Profile"
-                                />
+                        <div className="flex items-center gap-4">
+                            <button onClick={() => setView('feed')} className={`text-slate-700 hover:text-black transition ${activeView === 'feed' ? 'text-black' : ''}`}>
+                                <span className="material-icons-round text-3xl">home</span>
+                            </button>
+                            <button onClick={() => setView('explore')} className={`text-slate-700 hover:text-black transition ${activeView === 'explore' ? 'text-black' : ''}`}>
+                                <span className="material-icons-round text-3xl">search</span>
+                            </button>
+                            <button onClick={() => setView('create_post')} className="text-slate-700 hover:text-black transition">
+                                <span className="material-icons-round text-3xl">add_box</span>
+                            </button>
+                            <button onClick={() => setView('my_profile')} className="flex items-center gap-2 hover:opacity-80 transition">
+                                <img src={photo} className={`w-8 h-8 rounded-full border border-slate-300 object-cover ${activeView === 'my_profile' ? 'ring-2 ring-black' : ''}`} />
                             </button>
                         </div>
                     )}
@@ -132,10 +169,10 @@
             );
         }
 
-        // 2. Auth Page
+        // --- AUTH ---
         function AuthPage({ setUser }) {
             const [isLogin, setIsLogin] = useState(true);
-            const [email, setEmail] = useState('');
+            const [emailInput, setEmailInput] = useState('');
             const [password, setPassword] = useState('');
             const [name, setName] = useState('');
             const [username, setUsername] = useState('');
@@ -149,26 +186,33 @@
                 setError('');
                 try {
                     if (isLogin) {
-                        await signInWithEmailAndPassword(auth, email, password);
+                        let loginEmail = emailInput;
+                        if (!emailInput.includes('@')) {
+                            const q = query(collection(db, "users"), where("username", "==", emailInput.toLowerCase()));
+                            const snap = await getDocs(q);
+                            if (snap.empty) throw new Error("Username not found.");
+                            loginEmail = snap.docs[0].data().email;
+                        }
+                        await signInWithEmailAndPassword(auth, loginEmail, password);
                     } else {
                         if (!username) throw new Error("Username is required");
-                        // Check username availability
                         const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
                         const snap = await getDocs(q);
                         if(!snap.empty) throw new Error("Username already taken!");
 
-                        const res = await createUserWithEmailAndPassword(auth, email, password);
+                        const res = await createUserWithEmailAndPassword(auth, emailInput, password);
                         await updateProfile(res.user, { displayName: name, photoURL: "" });
                         
                         await setDoc(doc(db, "users", res.user.uid), {
                             uid: res.user.uid,
                             name: name,
                             username: username.toLowerCase(),
-                            email: email,
+                            email: emailInput,
                             country: country,
                             photoURL: "",
                             isVerified: false,
                             isBanned: false,
+                            isPrivate: false, 
                             lastSeen: serverTimestamp(),
                             createdAt: serverTimestamp()
                         });
@@ -184,34 +228,28 @@
                 <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-purple-50 to-orange-50">
                     <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
                         <div className="text-center mb-8">
-                            <h2 className="text-4xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500" style={{fontFamily: 'cursive'}}>Indiagram</h2>
+                            <h2 className="font-insta text-5xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500">Indiagram</h2>
                             <p className="text-slate-500 font-medium">{isLogin ? 'Login to see photos & videos' : 'Sign up to see photos & videos'}</p>
                         </div>
-                        
                         <form onSubmit={handleSubmit} className="space-y-3">
                             {!isLogin && (
                                 <>
-                                    <input type="text" placeholder="Full Name" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-slate-400 outline-none text-sm" value={name} onChange={e => setName(e.target.value)} />
-                                    <input type="text" placeholder="Username" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-slate-400 outline-none text-sm" value={username} onChange={e => setUsername(e.target.value)} />
+                                    <input type="text" placeholder="Full Name" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 outline-none text-sm" value={name} onChange={e => setName(e.target.value)} />
+                                    <input type="text" placeholder="Username" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 outline-none text-sm" value={username} onChange={e => setUsername(e.target.value)} />
                                     <select value={country} onChange={e => setCountry(e.target.value)} className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm">
                                         <option value="India">India</option>
                                         <option value="USA">USA</option>
-                                        <option value="UK">UK</option>
-                                        <option value="Canada">Canada</option>
                                         <option value="Other">Other</option>
                                     </select>
                                 </>
                             )}
-                            <input type="email" placeholder="Email" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-slate-400 outline-none text-sm" value={email} onChange={e => setEmail(e.target.value)} />
-                            <input type="password" placeholder="Password" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 focus:ring-1 focus:ring-slate-400 outline-none text-sm" value={password} onChange={e => setPassword(e.target.value)} />
-                            
+                            <input type="text" placeholder={isLogin ? "Email or Username" : "Email"} required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 outline-none text-sm" value={emailInput} onChange={e => setEmailInput(e.target.value)} />
+                            <input type="password" placeholder="Password" required className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 outline-none text-sm" value={password} onChange={e => setPassword(e.target.value)} />
                             {error && <div className="p-3 text-red-500 text-xs text-center">{error}</div>}
-                            
                             <button disabled={loading} className="w-full bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg font-bold transition disabled:opacity-50 text-sm">
                                 {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
                             </button>
                         </form>
-                        
                         <div className="text-center mt-6 p-4 border-t border-slate-100">
                             <p className="text-sm text-slate-600">
                                 {isLogin ? "Don't have an account?" : "Have an account?"} 
@@ -225,251 +263,134 @@
             );
         }
 
-        // 3. View Profile Modal (Other Users)
-        function UserProfileModal({ currentUser, targetUser, onClose, isAdmin, onAction }) {
-            return (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-                    <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in">
-                        <div className="h-24 bg-gradient-to-r from-purple-400 to-orange-400"></div>
-                        <div className="px-6 pb-6 -mt-12 text-center">
-                            <img src={targetUser.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + targetUser.uid} className="w-24 h-24 rounded-full border-4 border-white mx-auto bg-white object-cover shadow-md" />
-                            
-                            <div className="mt-3">
-                                <h2 className="text-xl font-bold flex items-center justify-center gap-1 text-slate-800">
-                                    {targetUser.name}
-                                    {targetUser.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
-                                </h2>
-                                <p className="text-slate-500 text-sm">@{targetUser.username}</p>
-                                {targetUser.isBanned && <span className="bg-red-100 text-red-600 text-[10px] px-2 py-0.5 rounded-full font-bold">BANNED</span>}
-                            </div>
+        // --- POST CARD ---
+        function PostCard({ post, currentUser, onLike, onComment, onShare, onViewProfile }) {
+            const [comment, setComment] = useState('');
+            const isLiked = post.likes?.includes(currentUser.uid);
 
-                            <div className="mt-6 border-t border-slate-100 pt-4 text-left space-y-3">
-                                <h3 className="font-bold text-sm text-slate-800">About this account</h3>
-                                <div className="flex items-center gap-3 text-sm text-slate-600">
-                                    <span className="material-icons-round text-slate-400">calendar_today</span>
-                                    <div>
-                                        <p className="text-xs text-slate-400">Date Joined</p>
-                                        <p>{formatDateIST(targetUser.createdAt)}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3 text-sm text-slate-600">
-                                    <span className="material-icons-round text-slate-400">public</span>
-                                    <div>
-                                        <p className="text-xs text-slate-400">Country Base</p>
-                                        <p>{targetUser.country || 'India'}</p>
-                                    </div>
-                                </div>
-                            </div>
+            const handlePostComment = (e) => {
+                e.preventDefault();
+                if (!comment.trim()) return;
+                onComment(post.id, comment);
+                setComment('');
+            };
 
-                            {/* Actions */}
-                            <div className="mt-6 grid grid-cols-2 gap-2">
-                                <button onClick={() => onAction('unfriend', targetUser)} className="w-full py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-200 transition">Unfriend</button>
-                                <button onClick={() => onAction('block', targetUser)} className="w-full py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 transition">Block</button>
-                            </div>
-
-                            {/* ADMIN CONTROLS */}
-                            {isAdmin && (
-                                <div className="mt-4 p-3 bg-slate-900 rounded-xl text-white">
-                                    <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Admin Controls</p>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        <button onClick={() => onAction('toggle_verify', targetUser)} className="text-xs py-2 bg-blue-600 rounded hover:bg-blue-700">
-                                            {targetUser.isVerified ? 'Remove Badge' : 'Give Blue Tick'}
-                                        </button>
-                                        <button onClick={() => onAction('toggle_ban', targetUser)} className="text-xs py-2 bg-red-600 rounded hover:bg-red-700">
-                                            {targetUser.isBanned ? 'Unban User' : 'Ban User'}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-
-                            <button onClick={onClose} className="mt-4 text-slate-400 text-sm hover:text-slate-600">Close</button>
-                        </div>
-                    </div>
-                </div>
-            );
-        }
-
-        // 4. My Profile View (NEW)
-        function MyProfile({ user, onEdit }) {
-            const [details, setDetails] = useState(null);
-
-            useEffect(() => {
-                getDoc(doc(db, "users", user.uid)).then(d => {
-                    if (d.exists()) setDetails(d.data());
+            const viewUser = () => {
+                onViewProfile({
+                    uid: post.userId,
+                    name: post.username,
+                    photoURL: post.userPic,
+                    isVerified: post.isVerified
                 });
-            }, [user]);
-
-            if (!details) return <div className="h-full flex items-center justify-center">Loading...</div>;
+            };
 
             return (
-                <div className="flex flex-col h-full bg-slate-50 p-4 overflow-y-auto items-center">
-                    <div className="max-w-md w-full bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div className="h-28 bg-gradient-to-r from-purple-500 to-orange-500"></div>
-                        <div className="px-6 pb-6 -mt-14 text-center">
-                            <img 
-                                src={details.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid} 
-                                className="w-28 h-28 rounded-full border-4 border-white mx-auto bg-white object-cover shadow-md" 
-                            />
-                            
-                            <div className="mt-4">
-                                <h2 className="text-2xl font-bold flex items-center justify-center gap-1 text-slate-800">
-                                    {details.name}
-                                    {details.isVerified && <span className="material-icons-round text-blue-500 text-lg">verified</span>}
-                                </h2>
-                                <p className="text-slate-500">@{details.username}</p>
-                            </div>
-
-                            <div className="mt-6 border-t border-slate-100 pt-6 text-left space-y-4">
-                                <div className="flex items-center gap-4 text-slate-700">
-                                    <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
-                                        <span className="material-icons-round">calendar_today</span>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-400 uppercase font-bold">Joined</p>
-                                        <p className="font-medium">{formatDateIST(details.createdAt)}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-4 text-slate-700">
-                                    <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600">
-                                        <span className="material-icons-round">public</span>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-slate-400 uppercase font-bold">Location</p>
-                                        <p className="font-medium">{details.country || 'India'}</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button onClick={onEdit} className="mt-8 w-full bg-slate-900 text-white py-3 rounded-xl font-bold shadow-lg shadow-slate-200 hover:bg-slate-800 transition">
-                                Edit Profile
+                <div className="bg-white border border-slate-200 rounded-xl mb-6 overflow-hidden">
+                    <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={viewUser}>
+                        <img src={post.userPic || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover border" />
+                        <span className="font-bold text-sm">{post.username}</span>
+                        {post.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
+                    </div>
+                    <img src={post.imageUrl} className="w-full object-cover max-h-[500px]" loading="lazy" />
+                    <div className="p-3">
+                        <div className="flex gap-4 mb-2">
+                            <button onClick={() => onLike(post.id, isLiked)} className={`${isLiked ? 'text-red-500' : 'text-slate-800'}`}>
+                                <span className="material-icons-round text-3xl">{isLiked ? 'favorite' : 'favorite_border'}</span>
                             </button>
+                            <button className="text-slate-800"><span className="material-icons-round text-3xl">mode_comment</span></button>
+                            <button onClick={() => onShare(post)} className="text-slate-800"><span className="material-icons-round text-3xl">send</span></button>
                         </div>
+                        <p className="text-sm font-bold mb-1">{post.likes?.length || 0} likes</p>
+                        <div className="text-sm mb-2">
+                            <span className="font-bold mr-2 cursor-pointer" onClick={viewUser}>{post.username}</span>
+                            {post.caption}
+                        </div>
+                        {post.comments?.length > 0 && (
+                            <div className="mb-2">
+                                <p className="text-xs text-slate-500 cursor-pointer">View all {post.comments.length} comments</p>
+                                {post.comments.slice(-2).map((c, i) => (
+                                    <div key={i} className="text-xs mt-1">
+                                        <span className="font-bold mr-1">{c.username}</span>{c.text}
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                        <p className="text-[10px] text-slate-400 uppercase tracking-wide">{formatDateIST(post.timestamp)}</p>
+                        
+                        <form onSubmit={handlePostComment} className="mt-3 flex items-center border-t pt-3">
+                            <input type="text" placeholder="Add a comment..." className="flex-1 text-sm outline-none" 
+                                value={comment} onChange={e => setComment(e.target.value)} />
+                            <button disabled={!comment.trim()} className="text-blue-500 text-sm font-bold disabled:opacity-50">Post</button>
+                        </form>
                     </div>
                 </div>
             );
         }
 
-        // 5. Edit Profile (Self) - Updated with Username & File Upload
-        function EditProfile({ user, onClose }) {
-            const [name, setName] = useState(user.displayName || '');
-            const [username, setUsername] = useState('');
-            const [country, setCountry] = useState('');
-            const [photoURL, setPhotoURL] = useState(user.photoURL || '');
+        // --- CREATE POST MODAL ---
+        function CreatePostModal({ user, onClose }) {
+            const [caption, setCaption] = useState('');
+            const [image, setImage] = useState(null);
             const [loading, setLoading] = useState(false);
-            const fileInputRef = useRef(null);
+            const fileRef = useRef();
 
-            useEffect(() => {
-                getDoc(doc(db, "users", user.uid)).then(d => {
-                    if (d.exists()) {
-                        const data = d.data();
-                        setCountry(data.country || 'India');
-                        setUsername(data.username || '');
-                    }
-                });
-            }, []);
-
-            const handleFileChange = (e) => {
+            const handleFile = (e) => {
                 const file = e.target.files[0];
-                if (file) {
-                    if (file.size > 1048576) { // 1MB limit
-                        alert("File is too big! Max 1MB.");
-                        return;
-                    }
+                if(file) {
+                    if(file.size > 2097152) return alert("Image too big (Max 2MB)");
                     const reader = new FileReader();
-                    reader.onloadend = () => {
-                        setPhotoURL(reader.result);
-                    };
+                    reader.onload = () => setImage(reader.result);
                     reader.readAsDataURL(file);
                 }
             };
 
-            const handleSave = async (e) => {
-                e.preventDefault();
+            const handlePost = async () => {
+                if(!image) return;
                 setLoading(true);
                 try {
-                    // 1. Check Username availability if changed
                     const userDoc = await getDoc(doc(db, "users", user.uid));
-                    const currentUsername = userDoc.data().username;
-                    
-                    if (username !== currentUsername) {
-                        if (!username.trim()) throw new Error("Username cannot be empty");
-                        const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
-                        const snap = await getDocs(q);
-                        if (!snap.empty) throw new Error("Username already taken!");
-                    }
+                    const isVerified = userDoc.exists() ? userDoc.data().isVerified : false;
 
-                    // 2. Update Auth & Firestore
-                    await updateProfile(auth.currentUser, { displayName: name, photoURL: photoURL });
-                    await updateDoc(doc(db, "users", user.uid), {
-                        name: name,
-                        username: username.toLowerCase(),
-                        country: country,
-                        photoURL: photoURL
+                    await addDoc(collection(db, "posts"), {
+                        userId: user.uid,
+                        username: user.displayName,
+                        userPic: user.photoURL,
+                        isVerified: isVerified,
+                        imageUrl: image,
+                        caption: caption,
+                        likes: [],
+                        comments: [],
+                        timestamp: serverTimestamp()
                     });
-                    
-                    alert("Profile Updated Successfully!");
+                    alert("Posted!");
                     onClose();
-                } catch (e) { 
-                    alert("Error: " + e.message); 
-                } finally { 
-                    setLoading(false); 
-                }
+                } catch(e) { alert("Error posting: " + e.message); }
+                finally { setLoading(false); }
             };
 
             return (
-                <div className="flex flex-col h-full bg-slate-50 p-4 overflow-y-auto">
-                    <div className="max-w-md mx-auto w-full bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-6">
-                            <button onClick={onClose} className="text-slate-500 hover:text-slate-800"><span className="material-icons-round">arrow_back</span></button>
-                            <h2 className="text-xl font-bold">Edit Profile</h2>
-                            <div className="w-6"></div>
+                <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl w-full max-w-md overflow-hidden">
+                        <div className="p-3 border-b text-center font-bold relative">
+                            Create new post
+                            <button onClick={onClose} className="absolute right-3 top-3 text-red-500 text-sm">Cancel</button>
                         </div>
-
-                        <div className="text-center mb-6">
-                            <div className="relative inline-block group cursor-pointer" onClick={() => fileInputRef.current.click()}>
-                                <img src={photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + user.uid} className="w-24 h-24 rounded-full border-4 border-slate-100 object-cover" />
-                                <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                                    <span className="material-icons-round text-white">edit</span>
+                        <div className="p-4 flex flex-col items-center">
+                            {image ? (
+                                <div className="w-full mb-4">
+                                    <img src={image} className="w-full max-h-64 object-contain rounded bg-black" />
+                                    <button onClick={() => setImage(null)} className="text-red-500 text-xs mt-2">Remove</button>
                                 </div>
-                            </div>
-                            <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
-                            <p className="text-xs text-blue-500 font-bold mt-2 cursor-pointer" onClick={() => fileInputRef.current.click()}>Change Profile Photo</p>
-                        </div>
-
-                        <form onSubmit={handleSave} className="space-y-4">
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Display Name</label>
-                                <input type="text" value={name} onChange={e => setName(e.target.value)} className="w-full p-3 border rounded-lg mt-1 focus:ring-2 focus:ring-blue-500 outline-none" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Username</label>
-                                <input type="text" value={username} onChange={e => setUsername(e.target.value)} className="w-full p-3 border rounded-lg mt-1 focus:ring-2 focus:ring-blue-500 outline-none" />
-                            </div>
-                            <div>
-                                <label className="text-xs font-bold text-slate-500 uppercase">Country</label>
-                                <select value={country} onChange={e => setCountry(e.target.value)} className="w-full p-3 border rounded-lg mt-1 bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                                    <option value="India">India</option>
-                                    <option value="USA">USA</option>
-                                    <option value="UK">UK</option>
-                                    <option value="Canada">Canada</option>
-                                    <option value="Other">Other</option>
-                                </select>
-                            </div>
-                            
-                            {/* Fallback URL input just in case */}
-                            <div className="pt-2">
-                                <label className="text-xs font-bold text-slate-400 uppercase">OR Image URL</label>
-                                <input type="text" value={photoURL} onChange={e => setPhotoURL(e.target.value)} placeholder="https://..." className="w-full p-2 border rounded text-xs mt-1" />
-                            </div>
-
-                            <button disabled={loading} className="w-full bg-blue-600 text-white p-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-200 mt-4">
-                                {loading ? 'Saving...' : 'Save Changes'}
-                            </button>
-                        </form>
-                        
-                        <div className="mt-8 border-t pt-4">
-                            <button onClick={() => signOut(auth)} className="w-full flex items-center justify-center gap-2 text-red-500 p-3 rounded-lg hover:bg-red-50 transition font-medium">
-                                <span className="material-icons-round">logout</span> Logout
+                            ) : (
+                                <div onClick={() => fileRef.current.click()} className="w-full h-48 border-2 border-dashed border-slate-300 rounded flex flex-col items-center justify-center cursor-pointer hover:bg-slate-50">
+                                    <span className="material-icons-round text-4xl text-slate-400">add_photo_alternate</span>
+                                    <p className="text-slate-500 text-sm mt-2">Upload Photo</p>
+                                </div>
+                            )}
+                            <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleFile} />
+                            <textarea className="w-full border rounded p-2 mt-4 text-sm outline-none resize-none" rows="3" placeholder="Write a caption..." value={caption} onChange={e => setCaption(e.target.value)}></textarea>
+                            <button disabled={!image || loading} onClick={handlePost} className="w-full bg-blue-500 text-white py-2 rounded mt-4 font-bold disabled:opacity-50">
+                                {loading ? 'Sharing...' : 'Share'}
                             </button>
                         </div>
                     </div>
@@ -477,256 +398,454 @@
             );
         }
 
-        // 6. Dashboard
+        // --- DASHBOARD ---
         function Dashboard({ user, userData }) {
-            const [view, setView] = useState('friends');
-            const [activeChat, setActiveChat] = useState(null);
+            const [view, setView] = useState('feed'); 
+            const [posts, setPosts] = useState([]);
+            const [following, setFollowing] = useState([]);
             const [viewingProfile, setViewingProfile] = useState(null);
-            
-            // --- DATA STATES ---
-            const [friends, setFriends] = useState([]);
-            const [usersList, setUsersList] = useState([]);
-            const [requests, setRequests] = useState([]);
-            const [searchQuery, setSearchQuery] = useState('');
 
-            // Admin Check
-            const isAdmin = userData?.username === 'admin';
-
-            // Update Last Seen
+            // Fetch Following list
             useEffect(() => {
-                const updateStatus = () => updateDoc(doc(db, "users", user.uid), { lastSeen: serverTimestamp() });
-                updateStatus();
-                const interval = setInterval(updateStatus, 300000); 
-                return () => clearInterval(interval);
+                const q = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("status", "==", "accepted"));
+                const unsub = onSnapshot(q, (snap) => {
+                    const ids = snap.docs.map(d => d.data().to);
+                    setFollowing([...ids, user.uid]); 
+                });
+                return () => unsub();
             }, [user]);
 
-            // Listeners
+            // Fetch Feed Posts
             useEffect(() => {
-                // Friend Requests
-                const qReq = query(collection(db, "friend_requests"), where("to", "==", user.uid));
-                const unsubReq = onSnapshot(qReq, (snap) => {
-                    setRequests(snap.docs.map(d => ({id: d.id, ...d.data()})).filter(r => r.status === 'pending'));
-                });
-
-                // Friends
-                const unsubFriends = onSnapshot(collection(db, "friend_requests"), async (snap) => {
-                   const allDocs = snap.docs.map(d => ({docId: d.id, ...d.data()}));
-                   // Get accepted connections
-                   const connections = allDocs.filter(d => (d.to === user.uid || d.from === user.uid) && d.status === 'accepted');
-                   const friendIds = connections.map(c => c.to === user.uid ? c.from : c.to);
-                   
-                   // Filter out blocked connections
-                   const blocked = allDocs.filter(d => (d.to === user.uid || d.from === user.uid) && d.status === 'blocked');
-                   const blockedIds = blocked.map(c => c.to === user.uid ? c.from : c.to);
-
-                   const activeFriendIds = friendIds.filter(id => !blockedIds.includes(id));
-
-                   if(activeFriendIds.length > 0) {
-                       const qUsers = query(collection(db, "users"));
-                       const userSnap = await getDocs(qUsers);
-                       // Enrich with docId for unfriend logic
-                       const myFriends = userSnap.docs.map(d => d.data())
-                           .filter(u => activeFriendIds.includes(u.uid))
-                           .map(u => ({...u, connectionId: connections.find(c => c.to === u.uid || c.from === u.uid).docId}));
-                       setFriends(myFriends);
-                   } else {
-                       setFriends([]);
-                   }
-                });
-
-                return () => { unsubReq(); unsubFriends(); };
-            }, [user]);
-
-            // Actions
-            const handleSearch = async () => {
-                if(!searchQuery.trim()) return;
-                const snap = await getDocs(query(collection(db, "users")));
-                const results = snap.docs.map(d => d.data())
-                    .filter(u => u.uid !== user.uid && 
-                           (u.username?.includes(searchQuery.toLowerCase()) || 
-                            u.name?.toLowerCase().includes(searchQuery.toLowerCase())));
-                setUsersList(results);
-            };
-
-            const sendRequest = async (target) => {
-                try {
-                    await addDoc(collection(db, "friend_requests"), {
-                        from: user.uid, fromName: user.displayName, to: target.uid, status: 'pending', timestamp: serverTimestamp()
+                if (view === 'feed' && following.length > 0) {
+                    const q = query(collection(db, "posts"), orderBy("timestamp", "desc"), limit(50));
+                    const unsub = onSnapshot(q, (snap) => {
+                        const allPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        const feed = allPosts.filter(p => following.includes(p.userId));
+                        setPosts(feed);
                     });
-                    alert("Request Sent!");
-                } catch(e) { console.error(e); }
+                    return () => unsub();
+                } else if (view === 'feed') {
+                    setPosts([]); 
+                }
+            }, [view, following]);
+
+            const handleLike = async (postId, isLiked) => {
+                const postRef = doc(db, "posts", postId);
+                const postDoc = await getDoc(postRef);
+                if (postDoc.exists()) {
+                    let likes = postDoc.data().likes || [];
+                    if (isLiked) likes = likes.filter(id => id !== user.uid);
+                    else likes.push(user.uid);
+                    await updateDoc(postRef, { likes });
+                }
             };
 
-            const acceptRequest = async (id) => await updateDoc(doc(db, "friend_requests", id), { status: 'accepted' });
-            
-            const handleProfileActions = async (action, targetUser) => {
-                try {
-                    if (action === 'toggle_verify') {
-                        await updateDoc(doc(db, "users", targetUser.uid), { isVerified: !targetUser.isVerified });
-                        alert("Status Updated");
-                    } 
-                    else if (action === 'toggle_ban') {
-                        await updateDoc(doc(db, "users", targetUser.uid), { isBanned: !targetUser.isBanned });
-                        alert("User Ban Status Updated");
-                    }
-                    else if (action === 'unfriend') {
-                        // Find connection ID
-                        const q1 = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("to", "==", targetUser.uid));
-                        const q2 = query(collection(db, "friend_requests"), where("from", "==", targetUser.uid), where("to", "==", user.uid));
-                        const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-                        const docToDelete = [...snap1.docs, ...snap2.docs][0];
-                        if(docToDelete) await deleteDoc(doc(db, "friend_requests", docToDelete.id));
-                        alert("Unfriended");
-                        setViewingProfile(null);
-                        setActiveChat(null);
-                    }
-                    else if (action === 'block') {
-                         // Find existing or create new block
-                         const q1 = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("to", "==", targetUser.uid));
-                         const q2 = query(collection(db, "friend_requests"), where("from", "==", targetUser.uid), where("to", "==", user.uid));
-                         const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-                         const docToUpdate = [...snap1.docs, ...snap2.docs][0];
-                         
-                         if(docToUpdate) {
-                             await updateDoc(doc(db, "friend_requests", docToUpdate.id), { status: 'blocked', blockedBy: user.uid });
-                         } else {
-                             await addDoc(collection(db, "friend_requests"), {
-                                 from: user.uid, to: targetUser.uid, status: 'blocked', blockedBy: user.uid, timestamp: serverTimestamp()
-                             });
-                         }
-                         alert("User Blocked");
-                         setViewingProfile(null);
-                         setActiveChat(null);
-                    }
-                } catch(e) { alert("Error: " + e.message); }
+            const handleComment = async (postId, text) => {
+                const postRef = doc(db, "posts", postId);
+                const postDoc = await getDoc(postRef);
+                if (postDoc.exists()) {
+                    let comments = postDoc.data().comments || [];
+                    comments.push({ username: user.displayName, text: text, timestamp: Date.now() });
+                    await updateDoc(postRef, { comments });
+                }
             };
 
-            // RENDER LOGIC
-            if (view === 'my_profile') {
-                return (
-                    <div className="h-screen flex flex-col">
-                        <Navbar user={user} onLogout={() => signOut(auth)} setView={setView} />
-                        <MyProfile user={user} onEdit={() => setView('edit_profile')} />
-                    </div>
-                );
-            }
-
-            if (view === 'edit_profile') {
-                return (
-                    <div className="h-screen flex flex-col">
-                        <Navbar user={user} onLogout={() => signOut(auth)} setView={setView} />
-                        <EditProfile user={user} onClose={() => setView('my_profile')} />
-                    </div>
-                );
-            }
+            const handleShare = (post) => {
+                navigator.clipboard.writeText(`Check out this post by ${post.username}: ${post.caption}`);
+                alert("Link copied!");
+            };
 
             return (
-                <div className="h-screen flex flex-col">
-                    <Navbar user={user} onLogout={() => signOut(auth)} setView={setView} />
+                <div className="h-screen flex flex-col bg-slate-50">
+                    <Navbar user={user} userData={userData} onLogout={() => signOut(auth)} setView={setView} activeView={view} />
                     
                     {viewingProfile && (
                         <UserProfileModal 
                             currentUser={userData} 
                             targetUser={viewingProfile} 
-                            isAdmin={isAdmin}
-                            onClose={() => setViewingProfile(null)}
-                            onAction={handleProfileActions}
+                            isAdmin={userData?.username === 'admin'} 
+                            onClose={() => setViewingProfile(null)} 
+                            onViewProfile={setViewingProfile}
                         />
                     )}
 
-                    <div className="flex-1 overflow-hidden flex bg-white">
-                        {/* SIDEBAR */}
-                        <div className={`w-full md:w-96 border-r border-slate-200 flex flex-col ${activeChat ? 'hidden md:flex' : 'flex'}`}>
-                            
-                            <div className="p-2 grid grid-cols-3 gap-1 border-b">
-                                <button onClick={() => setView('friends')} className={`py-3 text-sm font-semibold border-b-2 transition ${view === 'friends' ? 'border-black text-black' : 'border-transparent text-slate-400'}`}>Friends</button>
-                                <button onClick={() => setView('search')} className={`py-3 text-sm font-semibold border-b-2 transition ${view === 'search' ? 'border-black text-black' : 'border-transparent text-slate-400'}`}>Search</button>
-                                <button onClick={() => setView('requests')} className={`relative py-3 text-sm font-semibold border-b-2 transition ${view === 'requests' ? 'border-black text-black' : 'border-transparent text-slate-400'}`}>
-                                    Reqs {requests.length > 0 && <span className="absolute top-3 right-4 w-2 h-2 bg-red-500 rounded-full"></span>}
-                                </button>
-                            </div>
+                    {view === 'create_post' && <CreatePostModal user={user} onClose={() => setView('feed')} />}
 
-                            <div className="flex-1 overflow-y-auto p-0">
-                                {view === 'friends' && (
-                                    <div className="divide-y divide-slate-50">
-                                        {friends.map(f => (
-                                            <div key={f.uid} className="flex items-center justify-between p-4 hover:bg-slate-50 transition cursor-pointer">
-                                                <div className="flex items-center gap-3 flex-1" onClick={() => setActiveChat(f)}>
-                                                    <div className="relative">
-                                                        <img src={f.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + f.uid} className="w-12 h-12 rounded-full border border-slate-200" />
-                                                        {f.isVerified && <span className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5"><span className="material-icons-round text-blue-500 text-base">verified</span></span>}
-                                                    </div>
-                                                    <div>
-                                                        <h4 className="font-semibold text-slate-900">{f.name}</h4>
-                                                        <p className="text-xs text-slate-500">{formatLastSeen(f.lastSeen)}</p>
-                                                    </div>
-                                                </div>
-                                                <button onClick={() => setViewingProfile(f)} className="text-slate-400 hover:text-black p-2"><span className="material-icons-round">info</span></button>
-                                            </div>
-                                        ))}
+                    <div className="flex-1 overflow-y-auto max-w-4xl mx-auto w-full p-4">
+                        
+                        {view === 'feed' && (
+                            <div className="max-w-lg mx-auto">
+                                {posts.length === 0 ? (
+                                    <div className="text-center mt-10">
+                                        <p className="text-xl font-insta mb-2">Welcome to Indiagram</p>
+                                        <p className="text-sm text-slate-500">Follow people to see their photos here.</p>
+                                        <button onClick={() => setView('explore')} className="text-blue-500 font-bold mt-2">Find People</button>
                                     </div>
+                                ) : (
+                                    posts.map(post => (
+                                        <PostCard 
+                                            key={post.id} 
+                                            post={post} 
+                                            currentUser={user} 
+                                            onLike={handleLike} 
+                                            onComment={handleComment}
+                                            onShare={handleShare}
+                                            onViewProfile={setViewingProfile}
+                                        />
+                                    ))
                                 )}
-
-                                {view === 'search' && (
-                                    <div className="p-4 space-y-4">
-                                        <div className="flex gap-2 bg-slate-100 p-2 rounded-lg">
-                                            <span className="material-icons-round text-slate-400">search</span>
-                                            <input className="bg-transparent text-sm outline-none flex-1" placeholder="Search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                                            <button onClick={handleSearch} className="text-xs font-bold text-blue-500">GO</button>
-                                        </div>
-                                        {usersList.map(u => (
-                                            <div key={u.uid} className="flex justify-between items-center py-2">
-                                                <div className="flex items-center gap-3 cursor-pointer" onClick={() => setViewingProfile(u)}>
-                                                    <img src={u.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + u.uid} className="w-10 h-10 rounded-full" />
-                                                    <div>
-                                                        <div className="flex items-center gap-1">
-                                                            <p className="text-sm font-bold">{u.name}</p>
-                                                            {u.isVerified && <span className="material-icons-round text-blue-500 text-xs">verified</span>}
-                                                        </div>
-                                                        <p className="text-xs text-slate-400">@{u.username}</p>
-                                                    </div>
-                                                </div>
-                                                <button onClick={() => sendRequest(u)} className="text-xs bg-blue-500 text-white px-4 py-1.5 rounded font-bold">Follow</button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-
-                                {view === 'requests' && requests.map(r => (
-                                    <div key={r.id} className="p-4 flex items-center justify-between border-b border-slate-50">
-                                        <div className="text-sm">
-                                            <span className="font-bold">{r.fromName}</span> sent a request.
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <button onClick={() => acceptRequest(r.id)} className="bg-blue-500 text-white text-xs px-3 py-1.5 rounded font-bold">Confirm</button>
-                                            <button onClick={() => deleteDoc(doc(db,"friend_requests",r.id))} className="bg-slate-200 text-black text-xs px-3 py-1.5 rounded font-bold">Delete</button>
-                                        </div>
-                                    </div>
-                                ))}
                             </div>
+                        )}
+
+                        {(view === 'explore' || view === 'friends') && (
+                            <ExploreChatView 
+                                user={user} 
+                                userData={userData}
+                                viewType={view} 
+                                setViewingProfile={setViewingProfile}
+                            />
+                        )}
+
+                        {view === 'my_profile' && (
+                            <MyProfile 
+                                user={user} 
+                                onEdit={() => setView('edit_profile')} 
+                                onLogout={() => signOut(auth)} 
+                                onViewProfile={setViewingProfile}
+                            />
+                        )}
+
+                        {view === 'edit_profile' && (
+                            <EditProfile user={user} onClose={() => setView('my_profile')} />
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- SUB COMPONENTS ---
+
+        function UserListModal({ title, users, onClose, onViewProfile }) {
+            return (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl w-full max-w-sm overflow-hidden flex flex-col max-h-[70vh] animate-fade-in shadow-2xl">
+                        <div className="p-4 border-b flex justify-between items-center bg-slate-50">
+                            <h3 className="font-bold">{title}</h3>
+                            <button onClick={onClose}><span className="material-icons-round">close</span></button>
                         </div>
-
-                        {/* CHAT AREA */}
-                        <div className={`flex-1 flex flex-col bg-white ${activeChat ? 'flex fixed inset-0 z-50 md:static' : 'hidden md:flex'}`}>
-                            {activeChat ? (
-                                <ChatWindow currentUser={user} targetUser={activeChat} onBack={() => setActiveChat(null)} onInfo={() => setViewingProfile(activeChat)} />
-                            ) : (
-                                <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
-                                    <div className="w-24 h-24 border-2 border-slate-200 rounded-full flex items-center justify-center mb-4">
-                                        <span className="material-icons-round text-4xl text-slate-200">send</span>
+                        <div className="overflow-y-auto p-2">
+                            {users.length === 0 ? <p className="text-center p-4 text-slate-500 text-sm">No users found.</p> : 
+                             users.map(u => (
+                                <div key={u.uid} className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-lg cursor-pointer" onClick={() => { onClose(); onViewProfile(u); }}>
+                                    <img src={u.photoURL || DEFAULT_AVATAR} className="w-10 h-10 rounded-full bg-slate-200 object-cover" />
+                                    <div>
+                                        <p className="font-bold text-sm flex items-center gap-1">{u.name} {u.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</p>
+                                        <p className="text-xs text-slate-500">@{u.username}</p>
                                     </div>
-                                    <p>Your Messages</p>
-                                    <p className="text-sm">Send private photos and messages to a friend.</p>
                                 </div>
-                            )}
+                             ))
+                            }
                         </div>
                     </div>
                 </div>
             );
         }
 
-        // 7. Chat Window
-        function ChatWindow({ currentUser, targetUser, onBack, onInfo }) {
+        function UserProfileModal({ currentUser, targetUser, onClose, isAdmin, onViewProfile }) {
+            const [posts, setPosts] = useState([]);
+            const [fullTargetUser, setFullTargetUser] = useState(targetUser);
+            const [relationship, setRelationship] = useState('none');
+            const [followerCount, setFollowerCount] = useState(0);
+            const [followingCount, setFollowingCount] = useState(0);
+            const [showList, setShowList] = useState(null);
+            const [listData, setListData] = useState([]);
+
+            useEffect(() => {
+                if(!targetUser.uid) return;
+                
+                const fetchUser = async () => {
+                    const docSnap = await getDoc(doc(db, "users", targetUser.uid));
+                    if(docSnap.exists()) setFullTargetUser(docSnap.data());
+                };
+                fetchUser();
+
+                const qRel = query(collection(db, "friend_requests"), where("from", "==", currentUser.uid), where("to", "==", targetUser.uid));
+                onSnapshot(qRel, (snap) => {
+                    if(!snap.empty) {
+                        const status = snap.docs[0].data().status;
+                        setRelationship(status === 'accepted' ? 'following' : 'requested');
+                    } else {
+                        setRelationship('none');
+                    }
+                });
+
+                const qPosts = query(collection(db, "posts"), where("userId", "==", targetUser.uid), orderBy("timestamp", "desc"));
+                onSnapshot(qPosts, snap => setPosts(snap.docs.map(d => d.data())));
+
+                const qFollowers = query(collection(db, "friend_requests"), where("to", "==", targetUser.uid), where("status", "==", "accepted"));
+                onSnapshot(qFollowers, snap => setFollowerCount(snap.size));
+                
+                const qFollowing = query(collection(db, "friend_requests"), where("from", "==", targetUser.uid), where("status", "==", "accepted"));
+                onSnapshot(qFollowing, snap => setFollowingCount(snap.size));
+
+            }, [targetUser, currentUser]);
+
+            const canView = !fullTargetUser.isPrivate || relationship === 'following' || targetUser.uid === currentUser.uid;
+
+            const handleFollow = async () => {
+                const status = fullTargetUser.isPrivate ? 'pending' : 'accepted';
+                await addDoc(collection(db, "friend_requests"), {
+                    from: currentUser.uid, fromName: currentUser.name, to: targetUser.uid, status: status, timestamp: serverTimestamp()
+                });
+            };
+
+            const handleUnfollow = async () => {
+                const q = query(collection(db, "friend_requests"), where("from", "==", currentUser.uid), where("to", "==", targetUser.uid));
+                const snap = await getDocs(q);
+                snap.forEach(d => deleteDoc(d.ref));
+            };
+
+            const handleAction = async (action) => {
+                try {
+                    if (action === 'block') {
+                         await addDoc(collection(db, "friend_requests"), {
+                             from: currentUser.uid, to: targetUser.uid, status: 'blocked', blockedBy: currentUser.uid, timestamp: serverTimestamp()
+                         });
+                         alert("User Blocked");
+                         onClose();
+                    } else if (action === 'toggle_verify') {
+                        const newStatus = !fullTargetUser.isVerified;
+                        const updateData = { isVerified: newStatus };
+                        if (newStatus) updateData.verifiedAt = serverTimestamp();
+                        else updateData.verifiedAt = null;
+                        
+                        await updateDoc(doc(db, "users", targetUser.uid), updateData);
+                        setFullTargetUser(prev => ({...prev, isVerified: newStatus, verifiedAt: newStatus ? {seconds: Date.now()/1000} : null}));
+                        alert("Status Updated");
+                    } 
+                    else if (action === 'toggle_ban') {
+                        const newStatus = !fullTargetUser.isBanned;
+                        await updateDoc(doc(db, "users", targetUser.uid), { isBanned: newStatus });
+                        setFullTargetUser(prev => ({...prev, isBanned: newStatus}));
+                        alert("User Ban Status Updated");
+                    }
+                } catch(e) { alert("Error: " + e.message); }
+            };
+
+            const openList = async (type) => {
+                if (!canView) return;
+                setShowList(type);
+                setListData([]);
+                const field = type === 'followers' ? 'to' : 'from';
+                const targetField = type === 'followers' ? 'from' : 'to';
+                
+                const q = query(collection(db, "friend_requests"), where(field, "==", targetUser.uid), where("status", "==", "accepted"));
+                const snap = await getDocs(q);
+                const ids = snap.docs.map(d => d.data()[targetField]);
+                
+                if (ids.length > 0) {
+                    const chunks = [];
+                    for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+                    let users = [];
+                    for (let chunk of chunks) {
+                        const qU = query(collection(db, "users"), where("uid", "in", chunk));
+                        const s = await getDocs(qU);
+                        users = [...users, ...s.docs.map(d => d.data())];
+                    }
+                    setListData(users);
+                }
+            };
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <div className="bg-white rounded-xl w-full max-w-2xl h-[85vh] overflow-hidden flex flex-col md:flex-row shadow-2xl relative">
+                        <div className="p-6 border-b md:border-r md:w-5/12 flex flex-col items-center text-center overflow-y-auto">
+                            <img src={fullTargetUser.photoURL || DEFAULT_AVATAR} className="w-24 h-24 rounded-full border p-1 mb-3 object-cover" />
+                            <h2 className="font-bold text-xl flex items-center gap-1">
+                                {fullTargetUser.name} {fullTargetUser.isVerified && <span className="material-icons-round text-blue-500 text-xl">verified</span>}
+                            </h2>
+                            <p className="text-slate-500 text-sm mb-4">@{fullTargetUser.username}</p>
+                            
+                            <div className="flex justify-around w-full mb-6 text-sm">
+                                <div>
+                                    <span className="font-bold block text-lg">{posts.length}</span>
+                                    <span className="text-slate-500">Posts</span>
+                                </div>
+                                <div className="cursor-pointer" onClick={() => openList('followers')}>
+                                    <span className="font-bold block text-lg">{followerCount}</span>
+                                    <span className="text-slate-500">Followers</span>
+                                </div>
+                                <div className="cursor-pointer" onClick={() => openList('following')}>
+                                    <span className="font-bold block text-lg">{followingCount}</span>
+                                    <span className="text-slate-500">Following</span>
+                                </div>
+                            </div>
+
+                            {targetUser.uid !== currentUser.uid && (
+                                <div className="w-full space-y-2 mb-6">
+                                    {relationship === 'none' && <button onClick={handleFollow} className="bg-blue-500 text-white px-6 py-2 rounded-lg font-bold text-sm w-full">Follow</button>}
+                                    {relationship === 'requested' && <button onClick={handleUnfollow} className="bg-slate-100 text-slate-700 px-6 py-2 rounded-lg font-bold text-sm w-full">Requested</button>}
+                                    {relationship === 'following' && <button onClick={handleUnfollow} className="bg-slate-100 text-slate-700 px-6 py-2 rounded-lg font-bold text-sm w-full">Unfollow</button>}
+                                    <button onClick={() => handleAction('block')} className="text-red-500 text-xs font-bold w-full py-2 border border-red-100 rounded-lg hover:bg-red-50">Block</button>
+                                </div>
+                            )}
+
+                            {isAdmin && (
+                                <div className="mt-4 p-3 bg-slate-900 rounded-xl text-white w-full text-center">
+                                    <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Admin Controls</p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <button onClick={() => handleAction('toggle_verify')} className="text-xs py-2 bg-blue-600 rounded hover:bg-blue-700">
+                                            {fullTargetUser.isVerified ? 'Remove Badge' : 'Give Blue Tick'}
+                                        </button>
+                                        <button onClick={() => handleAction('toggle_ban')} className="text-xs py-2 bg-red-600 rounded hover:bg-red-700">
+                                            {fullTargetUser.isBanned ? 'Unban User' : 'Ban User'}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="w-full text-left bg-slate-50 p-3 rounded-lg mt-4">
+                                <h3 className="font-bold text-xs text-slate-400 uppercase mb-2">About this account</h3>
+                                <div className="text-sm space-y-2">
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Joined</span>
+                                        <span>{formatDateIST(fullTargetUser.createdAt)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-slate-500">Based In</span>
+                                        <span>{fullTargetUser.country || 'India'}</span>
+                                    </div>
+                                    {fullTargetUser.isVerified && (
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Verified On</span>
+                                            <span>{fullTargetUser.verifiedAt ? formatDateIST(fullTargetUser.verifiedAt) : 'Recently'}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <button onClick={onClose} className="mt-auto pt-6 text-slate-400 hover:text-black">Close</button>
+                        </div>
+
+                        <div className="flex-1 bg-white overflow-y-auto p-1">
+                            {canView ? (
+                                <div className="grid grid-cols-3 gap-1">
+                                    {posts.map((p, i) => (
+                                        <div key={i} className="aspect-square bg-slate-100 relative group cursor-pointer">
+                                            <img src={p.imageUrl} className="w-full h-full object-cover" />
+                                            <div className="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center text-white gap-2">
+                                                <span className="material-icons-round text-sm">favorite</span> {p.likes?.length}
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {posts.length === 0 && <div className="col-span-3 text-center py-20 text-slate-400">No posts yet</div>}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col items-center justify-center h-full text-center p-6">
+                                    <div className="w-16 h-16 border-2 border-slate-300 rounded-full flex items-center justify-center mb-4">
+                                        <span className="material-icons-round text-3xl text-slate-400">lock</span>
+                                    </div>
+                                    <h3 className="font-bold">This Account is Private</h3>
+                                    <p className="text-sm text-slate-500">Follow to see their photos and videos.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {showList && (
+                        <UserListModal 
+                            title={showList === 'followers' ? 'Followers' : 'Following'} 
+                            users={listData} 
+                            onClose={() => setShowList(null)} 
+                            onViewProfile={onViewProfile}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        function ExploreChatView({ user, userData, viewType, setViewingProfile }) {
+            const [usersList, setUsersList] = useState([]);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [requests, setRequests] = useState([]);
+            const [friends, setFriends] = useState([]); 
+            const [activeChat, setActiveChat] = useState(null);
+
+            useEffect(() => {
+                const qReq = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "pending"));
+                onSnapshot(qReq, (snap) => setRequests(snap.docs.map(d => ({id: d.id, ...d.data()}))));
+
+                const qFriends = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("status", "==", "accepted"));
+                onSnapshot(qFriends, async (snap) => {
+                    const ids = snap.docs.map(d => d.data().to);
+                    if(ids.length > 0) {
+                        const q = query(collection(db, "users"), where("uid", "in", ids.slice(0, 10)));
+                        const s = await getDocs(q);
+                        setFriends(s.docs.map(d => d.data()));
+                    }
+                });
+            }, [user]);
+
+            const handleSearch = async () => {
+                if(!searchQuery.trim()) return;
+                const snap = await getDocs(query(collection(db, "users"), limit(20)));
+                const results = snap.docs.map(d => d.data()).filter(u => 
+                    u.uid !== user.uid && (u.username.includes(searchQuery.toLowerCase()) || u.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                );
+                setUsersList(results);
+            };
+
+            const acceptRequest = async (id) => await updateDoc(doc(db, "friend_requests", id), { status: 'accepted' });
+
+            if (activeChat) return <div className="h-full bg-white rounded-lg border"><ChatWindow currentUser={user} targetUser={activeChat} onBack={() => setActiveChat(null)} /></div>;
+
+            return (
+                <div className="bg-white rounded-xl shadow-sm border h-[80vh] flex flex-col overflow-hidden">
+                    <div className="p-4 border-b">
+                        <div className="relative">
+                            <input className="w-full bg-slate-100 p-2 pl-9 rounded-lg text-sm outline-none" placeholder="Search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSearch()} />
+                            <span className="material-icons-round absolute left-2 top-2 text-slate-400 text-sm">search</span>
+                        </div>
+                    </div>
+                    
+                    <div className="flex-1 overflow-y-auto">
+                        {requests.length > 0 && (
+                            <div className="p-4 border-b">
+                                <h3 className="font-bold text-sm mb-2">Follow Requests</h3>
+                                {requests.map(r => (
+                                    <div key={r.id} className="flex justify-between items-center mb-2">
+                                        <span className="text-sm font-bold">{r.fromName}</span>
+                                        <div className="flex gap-2">
+                                            <button onClick={() => acceptRequest(r.id)} className="bg-blue-500 text-white text-xs px-3 py-1 rounded">Confirm</button>
+                                            <button onClick={() => deleteDoc(doc(db, "friend_requests", r.id))} className="bg-slate-200 text-xs px-3 py-1 rounded">Delete</button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <div className="p-2">
+                            {(searchQuery ? usersList : friends).map(u => (
+                                <div key={u.uid} className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-lg cursor-pointer" onClick={() => viewType === 'friends' ? setActiveChat(u) : setViewingProfile(u)}>
+                                    <div className="flex items-center gap-3">
+                                        <img src={u.photoURL || DEFAULT_AVATAR} className="w-10 h-10 rounded-full object-cover bg-slate-200" />
+                                        <div>
+                                            <p className="text-sm font-bold">{u.name} {u.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</p>
+                                            <p className="text-xs text-slate-500">@{u.username}</p>
+                                        </div>
+                                    </div>
+                                    {viewType === 'friends' && <span className="material-icons-round text-slate-400">navigate_next</span>}
+                                </div>
+                            ))}
+                            {!searchQuery && friends.length === 0 && viewType === 'friends' && <p className="text-center text-slate-400 mt-10">Follow people to chat.</p>}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function ChatWindow({ currentUser, targetUser, onBack }) {
             const [messages, setMessages] = useState([]);
             const [input, setInput] = useState('');
             const scrollRef = useRef();
@@ -735,8 +854,7 @@
                 const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
                 const q = query(collection(db, "messages"), where("chatId", "==", chatId));
                 const unsub = onSnapshot(q, (snap) => {
-                    const msgs = snap.docs.map(d => ({id: d.id, ...d.data()}))
-                        .sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
+                    const msgs = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
                     setMessages(msgs);
                     setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
                 });
@@ -747,104 +865,214 @@
                 e.preventDefault();
                 if(!input.trim()) return;
                 const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
-                await addDoc(collection(db, "messages"), {
-                    chatId, text: input, senderId: currentUser.uid, timestamp: serverTimestamp()
-                });
+                await addDoc(collection(db, "messages"), { chatId, text: input, senderId: currentUser.uid, timestamp: serverTimestamp() });
                 setInput('');
-                updateDoc(doc(db, "users", currentUser.uid), { lastSeen: serverTimestamp() });
-            };
-
-            const deleteMessage = async (id) => {
-                if(confirm("Unsend message?")) await deleteDoc(doc(db, "messages", id));
             };
 
             return (
                 <div className="flex flex-col h-full bg-white">
-                    {/* Header */}
                     <div className="px-4 py-3 border-b flex items-center gap-3">
-                        <button onClick={onBack} className="md:hidden text-slate-800"><span className="material-icons-round">arrow_back</span></button>
-                        <div className="flex items-center gap-3 cursor-pointer" onClick={onInfo}>
-                            <img src={targetUser.photoURL || "https://api.dicebear.com/7.x/avataaars/svg?seed=" + targetUser.uid} className="w-8 h-8 rounded-full border border-slate-200" />
-                            <div>
-                                <h3 className="font-bold text-sm flex items-center gap-1">
-                                    {targetUser.name}
-                                    {targetUser.isVerified && <span className="material-icons-round text-blue-500 text-xs">verified</span>}
-                                </h3>
-                                <p className="text-xs text-slate-500">{formatLastSeen(targetUser.lastSeen)}</p>
-                            </div>
-                        </div>
-                        <div className="flex-1"></div>
-                        <button onClick={onInfo} className="text-slate-800"><span className="material-icons-round">info_outline</span></button>
+                        <button onClick={onBack}><span className="material-icons-round">arrow_back</span></button>
+                        <img src={targetUser.photoURL || DEFAULT_AVATAR} className="w-8 h-8 rounded-full" />
+                        <h3 className="font-bold text-sm">{targetUser.name}</h3>
                     </div>
-
-                    {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                        {messages.map(msg => {
-                            const isMe = msg.senderId === currentUser.uid;
-                            return (
-                                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[70%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                        <div 
-                                            onClick={() => isMe && deleteMessage(msg.id)}
-                                            className={`px-4 py-2 rounded-2xl text-[15px] cursor-pointer ${
-                                            isMe ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-900'
-                                        }`}>
-                                            {msg.text}
-                                        </div>
-                                        <span className="text-[10px] text-slate-400 mt-1 px-1">{formatTimeIST(msg.timestamp)}</span>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                        {messages.map(msg => (
+                            <div key={msg.id} className={`flex ${msg.senderId === currentUser.uid ? 'justify-end' : 'justify-start'}`}>
+                                <div className={`px-4 py-2 rounded-2xl text-sm ${msg.senderId === currentUser.uid ? 'bg-blue-500 text-white' : 'bg-slate-100'}`}>{msg.text}</div>
+                            </div>
+                        ))}
                         <div ref={scrollRef}></div>
                     </div>
-
-                    {/* Input */}
-                    <form onSubmit={sendMessage} className="p-3 m-3 border rounded-full flex gap-2 items-center">
-                        <span className="material-icons-round text-slate-400 pl-2">sentiment_satisfied</span>
-                        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Message..." 
-                            className="flex-1 bg-transparent outline-none text-sm" />
-                        <button type="submit" disabled={!input.trim()} className="text-blue-500 font-bold text-sm pr-2 disabled:opacity-50">Send</button>
+                    <form onSubmit={sendMessage} className="p-3 border-t flex gap-2">
+                        <input value={input} onChange={e => setInput(e.target.value)} placeholder="Message..." className="flex-1 bg-slate-50 rounded-full px-4 text-sm outline-none" />
+                        <button disabled={!input.trim()} className="text-blue-500 font-bold text-sm">Send</button>
                     </form>
                 </div>
             );
         }
 
-        // --- ROOT RENDER ---
+        function MyProfile({ user, onEdit, onLogout, onViewProfile }) {
+            const [userData, setUserData] = useState(null);
+            const [myPosts, setMyPosts] = useState([]);
+            const [followerCount, setFollowerCount] = useState(0);
+            const [followingCount, setFollowingCount] = useState(0);
+            const [showList, setShowList] = useState(null);
+            const [listData, setListData] = useState([]);
+
+            useEffect(() => {
+                getDoc(doc(db, "users", user.uid)).then(d => setUserData(d.data()));
+                const qPosts = query(collection(db, "posts"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
+                onSnapshot(qPosts, snap => setMyPosts(snap.docs.map(d => d.data())));
+                const qFollowers = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "accepted"));
+                onSnapshot(qFollowers, snap => setFollowerCount(snap.size));
+                const qFollowing = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("status", "==", "accepted"));
+                onSnapshot(qFollowing, snap => setFollowingCount(snap.size));
+            }, [user]);
+
+            const openList = async (type) => {
+                setShowList(type);
+                setListData([]);
+                const field = type === 'followers' ? 'to' : 'from';
+                const targetField = type === 'followers' ? 'from' : 'to';
+                const q = query(collection(db, "friend_requests"), where(field, "==", user.uid), where("status", "==", "accepted"));
+                const snap = await getDocs(q);
+                const ids = snap.docs.map(d => d.data()[targetField]);
+                if (ids.length > 0) {
+                    const chunks = [];
+                    for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+                    let users = [];
+                    for (let chunk of chunks) {
+                        const qU = query(collection(db, "users"), where("uid", "in", chunk));
+                        const s = await getDocs(qU);
+                        users = [...users, ...s.docs.map(d => d.data())];
+                    }
+                    setListData(users);
+                }
+            };
+
+            const toggleMyVerification = async () => {
+                if(userData.username !== 'admin') return;
+                const newStatus = !userData.isVerified;
+                const updateData = { isVerified: newStatus };
+                if (newStatus) updateData.verifiedAt = serverTimestamp();
+                else updateData.verifiedAt = null;
+                await updateDoc(doc(db, "users", user.uid), updateData);
+                setUserData({...userData, ...updateData});
+            };
+
+            if(!userData) return <div className="loader"></div>;
+
+            return (
+                <div className="flex flex-col h-full bg-white">
+                    <div className="p-6 flex gap-6 items-center border-b">
+                        <img src={userData.photoURL || DEFAULT_AVATAR} className="w-24 h-24 rounded-full border p-1 object-cover" />
+                        <div className="flex-1">
+                            <h2 className="text-xl font-bold flex items-center gap-1">
+                                {userData.username} {userData.isVerified && <span className="material-icons-round text-blue-500 text-xl">verified</span>}
+                            </h2>
+                            <div className="flex gap-4 my-3 text-sm">
+                                <span><b>{myPosts.length}</b> posts</span>
+                                <span className="cursor-pointer" onClick={() => openList('followers')}><b>{followerCount}</b> followers</span>
+                                <span className="cursor-pointer" onClick={() => openList('following')}><b>{followingCount}</b> following</span>
+                            </div>
+                            <div className="text-sm font-bold">{userData.name}</div>
+                            <p className="text-xs text-slate-500">{userData.country}</p>
+                        </div>
+                    </div>
+                    <div className="p-4 flex gap-2">
+                        <button onClick={onEdit} className="flex-1 bg-slate-100 py-1.5 rounded-lg text-sm font-bold">Edit Profile</button>
+                    </div>
+
+                    {userData.username === 'admin' && (
+                        <div className="px-4 pb-4">
+                            <button onClick={toggleMyVerification} className="w-full bg-slate-800 text-white py-2 rounded-lg text-xs font-bold">
+                                {userData.isVerified ? 'Remove My Blue Tick' : 'Get Blue Tick (Admin)'}
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-3 gap-1 flex-1 overflow-y-auto">
+                        {myPosts.map((p, i) => (
+                            <div key={i} className="aspect-square relative group bg-slate-100">
+                                <img src={p.imageUrl} className="w-full h-full object-cover" />
+                            </div>
+                        ))}
+                    </div>
+                    {showList && <UserListModal title={showList} users={listData} onClose={() => setShowList(null)} onViewProfile={onViewProfile} />}
+                </div>
+            );
+        }
+
+        function EditProfile({ user, onClose }) {
+            const [data, setData] = useState({ name: '', username: '', country: 'India', photoURL: '', isPrivate: false });
+            const [loading, setLoading] = useState(false);
+            const fileRef = useRef();
+
+            useEffect(() => {
+                getDoc(doc(db, "users", user.uid)).then(d => {
+                    if(d.exists()) setData({ ...d.data(), photoURL: d.data().photoURL || '' });
+                });
+            }, []);
+
+            const handleFile = (e) => {
+                const file = e.target.files[0];
+                if(file && file.size < 2097152) {
+                    const reader = new FileReader();
+                    reader.onload = () => setData({...data, photoURL: reader.result});
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const handleSave = async (e) => {
+                e.preventDefault();
+                setLoading(true);
+                try {
+                    await updateDoc(doc(db, "users", user.uid), data);
+                    await updateProfile(auth.currentUser, { displayName: data.name, photoURL: data.photoURL });
+                    alert("Saved!");
+                    onClose();
+                } catch(e) { alert(e.message); }
+                finally { setLoading(false); }
+            };
+
+            const handleDeleteAccount = async () => {
+                if(confirm("ARE YOU SURE? This will permanently delete your account.")) {
+                    try {
+                        await deleteDoc(doc(db, "users", user.uid));
+                        await deleteUser(user);
+                    } catch(e) { alert("Please login again freshly to delete account securely."); }
+                }
+            };
+
+            return (
+                <div className="bg-white h-full p-6 overflow-y-auto">
+                    <div className="flex justify-between items-center mb-6">
+                        <button onClick={onClose}>Cancel</button>
+                        <h2 className="font-bold">Edit Profile</h2>
+                        <button onClick={handleSave} className="text-blue-500 font-bold" disabled={loading}>Done</button>
+                    </div>
+                    <div className="flex flex-col items-center mb-6">
+                        <img src={data.photoURL || DEFAULT_AVATAR} className="w-20 h-20 rounded-full mb-3 object-cover" />
+                        <button onClick={() => fileRef.current.click()} className="text-blue-500 text-sm font-bold">Change Profile Photo</button>
+                        {data.photoURL && <button onClick={() => setData({...data, photoURL: ''})} className="text-red-500 text-xs mt-2">Remove Photo</button>}
+                        <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={handleFile} />
+                    </div>
+                    <div className="space-y-4 text-sm">
+                        <div><label className="text-xs text-slate-500">Name</label><input className="w-full border-b py-2 outline-none" value={data.name} onChange={e => setData({...data, name: e.target.value})} /></div>
+                        <div><label className="text-xs text-slate-500">Username</label><input className="w-full border-b py-2 outline-none" value={data.username} onChange={e => setData({...data, username: e.target.value})} /></div>
+                        <div className="flex items-center justify-between py-2"><label>Private Account</label><input type="checkbox" checked={data.isPrivate} onChange={e => setData({...data, isPrivate: e.target.checked})} /></div>
+                        <p className="text-xs text-slate-400">If private, only followers can see your posts.</p>
+                        <div className="mt-8 pt-6 border-t"><button onClick={handleDeleteAccount} className="w-full text-red-600 bg-red-50 py-3 rounded-xl font-bold hover:bg-red-100 transition text-sm">Delete Account Permanently</button></div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- ROOT APP ---
         function App() {
             const [user, setUser] = useState(null);
             const [userData, setUserData] = useState(null);
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                const unsub = onAuthStateChanged(auth, async (u) => {
+                const unsubAuth = onAuthStateChanged(auth, async (u) => {
                     if (u) {
-                        // Check if banned
-                        const userDoc = await getDoc(doc(db, "users", u.uid));
-                        if (userDoc.exists()) {
-                            const data = userDoc.data();
-                            if (data.isBanned) {
-                                alert("Your account has been disabled by the admin.");
-                                await signOut(auth);
-                                setUser(null);
-                                setUserData(null);
-                            } else {
-                                setUser(u);
-                                setUserData(data);
-                            }
-                        } else {
-                            setUser(u);
-                        }
+                        setUser(u);
+                        const unsubDoc = onSnapshot(doc(db, "users", u.uid), (docSnap) => {
+                            if (docSnap.exists()) setUserData(docSnap.data());
+                        });
+                        return () => unsubDoc();
                     } else {
                         setUser(null);
                         setUserData(null);
                     }
                     setLoading(false);
                 });
-                return () => unsub();
+                return () => unsubAuth();
             }, []);
 
-            if (loading) return <div className="h-screen flex items-center justify-center"><img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Instagram_logo.svg" className="w-16 animate-pulse"/></div>;
+            if (loading) return <div className="h-screen flex items-center justify-center"><div className="loader"></div></div>;
 
             return user ? <Dashboard user={user} userData={userData} /> : <AuthPage setUser={setUser} />;
         }
