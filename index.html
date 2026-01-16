@@ -47,7 +47,6 @@
 <body class="text-slate-900 h-screen w-screen overflow-hidden flex flex-col">
 
     <div id="root" class="h-full w-full flex flex-col">
-        <!-- Initial Loading State -->
         <div class="h-full flex flex-col items-center justify-center bg-white">
             <h1 class="font-insta text-4xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 mb-4">Indiagram</h1>
             <div class="loader"></div>
@@ -120,7 +119,6 @@
             const now = new Date();
             const diffMs = now - date;
             if (diffMs < 120000) return 'Online'; 
-            
             return "Last seen " + date.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true });
         };
 
@@ -163,13 +161,11 @@
                                 <span className="material-icons-round text-3xl">add_box</span>
                             </button>
                             
-                            {/* Notifications */}
                             <button onClick={() => setView('notifications')} className={`text-slate-700 hover:text-black transition relative ${activeView === 'notifications' ? 'text-black' : ''}`}>
                                 <span className="material-icons-round text-3xl">favorite_border</span>
                                 {notifCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
                             </button>
 
-                            {/* Messages Icon */}
                             <button onClick={() => setView('messages')} className={`text-slate-700 hover:text-black transition ${activeView === 'messages' ? 'text-black' : ''} relative`}>
                                 <span className="material-icons-round text-3xl">chat</span>
                                 {unreadCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>}
@@ -223,6 +219,7 @@
                             username: username.toLowerCase(),
                             email: emailInput,
                             country: country,
+                            bio: "", 
                             photoURL: "",
                             isVerified: false,
                             isBanned: false,
@@ -277,13 +274,12 @@
             );
         }
 
-        // --- POST CARD ---
+        // --- POST & MODALS ---
         function PostCard({ post, currentUser, onLike, onComment, onShare, onViewProfile, onDelete }) {
             const [comment, setComment] = useState('');
             const isLiked = post.likes?.includes(currentUser.uid);
             const [postUser, setPostUser] = useState(null);
 
-            // Fetch latest user data for blue tick and profile pic
             useEffect(() => {
                 const unsub = onSnapshot(doc(db, "users", post.userId), (doc) => {
                     if (doc.exists()) setPostUser(doc.data());
@@ -325,7 +321,7 @@
                             {postUser?.isVerified && <span className="material-icons-round text-blue-500 text-base">verified</span>}
                         </div>
                         {currentUser.uid === post.userId && (
-                            <button onClick={() => onDelete(post.id)} className="text-slate-400 hover:text-red-500">
+                            <button onClick={(e) => {e.stopPropagation(); onDelete(post.id)}} className="text-slate-400 hover:text-red-500">
                                 <span className="material-icons-round text-sm">delete</span>
                             </button>
                         )}
@@ -369,7 +365,6 @@
             );
         }
 
-        // --- CREATE POST MODAL ---
         function CreatePostModal({ user, onClose }) {
             const [caption, setCaption] = useState('');
             const [image, setImage] = useState(null);
@@ -440,6 +435,28 @@
             );
         }
 
+        // Post View Modal (For Grid Clicks)
+        function PostViewModal({ post, currentUser, onClose, onLike, onComment, onShare, onDelete }) {
+            return (
+                <div className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
+                    <div className="w-full max-w-lg bg-white rounded-xl overflow-hidden max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                        <div className="sticky top-0 bg-white z-10 flex justify-end p-2 border-b">
+                            <button onClick={onClose}><span className="material-icons-round">close</span></button>
+                        </div>
+                        <PostCard 
+                            post={post} 
+                            currentUser={currentUser}
+                            onLike={onLike}
+                            onComment={onComment}
+                            onShare={onShare}
+                            onDelete={(id) => { onDelete(id); onClose(); }}
+                            onViewProfile={() => {}}
+                        />
+                    </div>
+                </div>
+            );
+        }
+
         // --- DASHBOARD ---
         function Dashboard({ user, userData }) {
             const [view, setView] = useState('feed'); 
@@ -449,6 +466,7 @@
             const [activeChat, setActiveChat] = useState(null);
             const [unreadCount, setUnreadCount] = useState(0);
             const [notifications, setNotifications] = useState([]);
+            const [activePost, setActivePost] = useState(null); // For grid post click
 
             // Fetch Following list
             useEffect(() => {
@@ -460,24 +478,30 @@
                 return () => unsub();
             }, [user]);
 
-            // Fetch Notifications
+            // Fetch Notifications (Fixed Query)
             useEffect(() => {
-                const q = query(collection(db, "notifications"), where("to", "==", user.uid), orderBy("timestamp", "desc"), limit(20));
+                const q = query(collection(db, "notifications"), where("to", "==", user.uid));
                 const unsub = onSnapshot(q, (snap) => {
                     const notifs = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                    setNotifications(notifs);
+                    notifs.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)); 
+                    setNotifications(notifs.slice(0, 20)); 
                 });
                 return () => unsub();
             }, [user]);
 
             // Fetch Feed Posts
             useEffect(() => {
-                if (view === 'feed' && following.length > 0) {
-                    const q = query(collection(db, "posts"), orderBy("timestamp", "desc"), limit(50));
+                if (view === 'feed') {
+                    const q = query(collection(db, "posts"), limit(50));
                     const unsub = onSnapshot(q, (snap) => {
-                        const allPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
-                        const feed = allPosts.filter(p => following.includes(p.userId));
-                        setPosts(feed);
+                        let allPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                        if (following.length > 0) {
+                            allPosts = allPosts.filter(p => following.includes(p.userId));
+                        } else {
+                            allPosts = [];
+                        }
+                        allPosts.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+                        setPosts(allPosts);
                     });
                     return () => unsub();
                 } else if (view === 'feed') {
@@ -485,11 +509,9 @@
                 }
             }, [view, following]);
 
-            // Simple Unread Message Check (Mock logic for demo)
+            // Simple Unread Message Check
             useEffect(() => {
-                // In real app, check 'read' status per message
-                const q = query(collection(db, "messages"), where("receiverId", "==", user.uid), limit(1)); // Simplified
-                // For this demo, just random state if messages exist not from me
+                const q = query(collection(db, "messages"), where("receiverId", "==", user.uid), limit(1));
             }, []);
 
             const addNotification = async (toUser, type, content = "") => {
@@ -554,6 +576,19 @@
                             onViewProfile={setViewingProfile}
                             onMessage={startChat}
                             onAddNotif={addNotification}
+                            onViewPost={setActivePost}
+                        />
+                    )}
+
+                    {activePost && (
+                        <PostViewModal 
+                            post={activePost}
+                            currentUser={user}
+                            onClose={() => setActivePost(null)}
+                            onLike={handleLike}
+                            onComment={handleComment}
+                            onShare={handleShare}
+                            onDelete={handleDeletePost}
                         />
                     )}
 
@@ -627,6 +662,7 @@
                                 onEdit={() => setView('edit_profile')} 
                                 onLogout={() => signOut(auth)} 
                                 onViewProfile={setViewingProfile}
+                                onViewPost={setActivePost}
                             />
                         )}
 
@@ -666,7 +702,7 @@
             );
         }
 
-        function UserProfileModal({ currentUser, targetUser, onClose, isAdmin, onViewProfile, onMessage, onAddNotif }) {
+        function UserProfileModal({ currentUser, targetUser, onClose, isAdmin, onViewProfile, onMessage, onAddNotif, onViewPost }) {
             const [posts, setPosts] = useState([]);
             const [fullTargetUser, setFullTargetUser] = useState(targetUser);
             const [relationship, setRelationship] = useState('none');
@@ -692,8 +728,12 @@
                     } else setRelationship('none');
                 });
 
-                const qPosts = query(collection(db, "posts"), where("userId", "==", targetUser.uid), orderBy("timestamp", "desc"));
-                onSnapshot(qPosts, snap => setPosts(snap.docs.map(d => d.data())));
+                const qPosts = query(collection(db, "posts"), where("userId", "==", targetUser.uid));
+                onSnapshot(qPosts, snap => {
+                    const rawPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                    rawPosts.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+                    setPosts(rawPosts);
+                });
 
                 const qFollowers = query(collection(db, "friend_requests"), where("to", "==", targetUser.uid), where("status", "==", "accepted"));
                 onSnapshot(qFollowers, snap => setFollowerCount(snap.size));
@@ -775,7 +815,9 @@
                             <h2 className="font-bold text-xl flex items-center gap-1">
                                 {fullTargetUser.name} {fullTargetUser.isVerified && <span className="material-icons-round text-blue-500 text-xl">verified</span>}
                             </h2>
-                            <p className="text-slate-500 text-sm mb-4">@{fullTargetUser.username}</p>
+                            <p className="text-slate-500 text-sm mb-2">@{fullTargetUser.username}</p>
+                            {/* Bio Display */}
+                            {fullTargetUser.bio && <p className="text-sm text-slate-700 mb-4 px-2">{fullTargetUser.bio}</p>}
                             
                             <div className="flex justify-around w-full mb-6 text-sm">
                                 <div><span className="font-bold block text-lg">{posts.length}</span><span className="text-slate-500">Posts</span></div>
@@ -793,6 +835,7 @@
                                             <button onClick={handleUnfollow} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg font-bold text-sm">Unfollow</button>
                                         </div>
                                     )}
+                                    <button onClick={() => handleAction('block')} className="text-red-500 text-xs font-bold w-full py-2 border border-red-100 rounded-lg hover:bg-red-50">Block</button>
                                 </div>
                             )}
 
@@ -805,7 +848,7 @@
                                     </div>
                                 </div>
                             )}
-                            
+
                             <button onClick={onClose} className="mt-auto pt-6 text-slate-400 hover:text-black">Close</button>
                         </div>
 
@@ -813,7 +856,7 @@
                             {canView ? (
                                 <div className="grid grid-cols-3 gap-1">
                                     {posts.map((p, i) => (
-                                        <div key={i} className="aspect-square bg-slate-100 relative group cursor-pointer">
+                                        <div key={i} className="aspect-square bg-slate-100 relative group cursor-pointer" onClick={() => onViewPost(p)}>
                                             <img src={p.imageUrl} className="w-full h-full object-cover" />
                                             <div className="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center text-white gap-2"><span className="material-icons-round text-sm">favorite</span> {p.likes?.length}</div>
                                         </div>
@@ -985,7 +1028,10 @@
                             <button onClick={onBack}><span className="material-icons-round">arrow_back</span></button>
                             <img src={fullUser.photoURL || DEFAULT_AVATAR} className="w-8 h-8 rounded-full object-cover" />
                             <div>
-                                <h3 className="font-bold text-sm flex items-center gap-1">{fullUser.name} {fullUser.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</h3>
+                                <h3 className="font-bold text-sm flex items-center gap-1">
+                                    {fullUser.name} 
+                                    {fullUser.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}
+                                </h3>
                                 <p className="text-[10px] text-slate-500">@{fullUser.username}</p>
                             </div>
                         </div>
@@ -1015,7 +1061,7 @@
             );
         }
 
-        function MyProfile({ user, onEdit, onLogout, onViewProfile }) {
+        function MyProfile({ user, onEdit, onLogout, onViewProfile, onViewPost }) {
             const [userData, setUserData] = useState(null);
             const [myPosts, setMyPosts] = useState([]);
             const [followerCount, setFollowerCount] = useState(0);
@@ -1025,8 +1071,12 @@
 
             useEffect(() => {
                 getDoc(doc(db, "users", user.uid)).then(d => setUserData(d.data()));
-                const qPosts = query(collection(db, "posts"), where("userId", "==", user.uid), orderBy("timestamp", "desc"));
-                onSnapshot(qPosts, snap => setMyPosts(snap.docs.map(d => d.data())));
+                const qPosts = query(collection(db, "posts"), where("userId", "==", user.uid));
+                onSnapshot(qPosts, snap => {
+                    const rawPosts = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                    rawPosts.sort((a, b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0));
+                    setMyPosts(rawPosts);
+                });
                 const qFollowers = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "accepted"));
                 onSnapshot(qFollowers, snap => setFollowerCount(snap.size));
                 const qFollowing = query(collection(db, "friend_requests"), where("from", "==", user.uid), where("status", "==", "accepted"));
@@ -1076,6 +1126,7 @@
                                 <span className="cursor-pointer" onClick={() => openList('following')}><b>{followingCount}</b> following</span>
                             </div>
                             <div className="text-sm font-bold">{userData.name}</div>
+                            {userData.bio && <div className="text-sm text-slate-800">{userData.bio}</div>}
                             <p className="text-xs text-slate-500">{userData.country}</p>
                         </div>
                     </div>
@@ -1086,7 +1137,11 @@
                         <div className="px-4 pb-4"><button onClick={toggleMyVerification} className="w-full bg-slate-800 text-white py-2 rounded-lg text-xs font-bold">{userData.isVerified ? 'Remove My Blue Tick' : 'Get Blue Tick (Admin)'}</button></div>
                     )}
                     <div className="grid grid-cols-3 gap-1 flex-1 overflow-y-auto">
-                        {myPosts.map((p, i) => (<div key={i} className="aspect-square relative group bg-slate-100"><img src={p.imageUrl} className="w-full h-full object-cover" /></div>))}
+                        {myPosts.map((p, i) => (
+                            <div key={i} className="aspect-square relative group bg-slate-100" onClick={() => onViewPost(p)}>
+                                <img src={p.imageUrl} className="w-full h-full object-cover" />
+                            </div>
+                        ))}
                     </div>
                     {showList && <UserListModal title={showList} users={listData} onClose={() => setShowList(null)} onViewProfile={onViewProfile} />}
                 </div>
@@ -1094,7 +1149,7 @@
         }
 
         function EditProfile({ user, onClose }) {
-            const [data, setData] = useState({ name: '', username: '', country: 'India', photoURL: '', isPrivate: false });
+            const [data, setData] = useState({ name: '', username: '', country: 'India', photoURL: '', bio: '', isPrivate: false });
             const [loading, setLoading] = useState(false);
             const fileRef = useRef();
 
@@ -1141,6 +1196,7 @@
                     <div className="space-y-4 text-sm">
                         <div><label className="text-xs text-slate-500">Name</label><input className="w-full border-b py-2 outline-none" value={data.name} onChange={e => setData({...data, name: e.target.value})} /></div>
                         <div><label className="text-xs text-slate-500">Username</label><input className="w-full border-b py-2 outline-none" value={data.username} onChange={e => setData({...data, username: e.target.value})} /></div>
+                        <div><label className="text-xs text-slate-500">Bio</label><textarea className="w-full border-b py-2 outline-none resize-none" rows="2" value={data.bio} onChange={e => setData({...data, bio: e.target.value})} /></div>
                         <div className="flex items-center justify-between py-2"><label>Private Account</label><input type="checkbox" checked={data.isPrivate} onChange={e => setData({...data, isPrivate: e.target.checked})} /></div>
                         <p className="text-xs text-slate-400">If private, only followers can see your posts.</p>
                         <div className="mt-8 pt-6 border-t"><button onClick={handleDeleteAccount} className="w-full text-red-600 bg-red-50 py-3 rounded-xl font-bold hover:bg-red-100 transition text-sm">Delete Account Permanently</button></div>
@@ -1156,20 +1212,73 @@
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
+                let isMounted = true;
+                const safetyTimeout = setTimeout(() => {
+                    if (isMounted && loading) {
+                        console.warn("Loading timeout reached");
+                        setLoading(false);
+                    }
+                }, 5000); 
+
                 const unsubAuth = onAuthStateChanged(auth, async (u) => {
                     if (u) {
                         setUser(u);
-                        const unsubDoc = onSnapshot(doc(db, "users", u.uid), (docSnap) => {
-                            if (docSnap.exists()) setUserData(docSnap.data());
-                        });
-                        return () => unsubDoc();
-                    } else { setUser(null); setUserData(null); }
-                    setLoading(false);
+                        try {
+                            const userDoc = await getDoc(doc(db, "users", u.uid));
+                            if (isMounted) {
+                                if (userDoc.exists()) {
+                                    const data = userDoc.data();
+                                    if (data.isBanned) {
+                                        alert("Your account has been disabled by the admin.");
+                                        signOut(auth);
+                                        setUser(null);
+                                        setUserData(null);
+                                    } else {
+                                        setUserData(data);
+                                        // Update online status
+                                        updateDoc(doc(db, "users", u.uid), { lastSeen: serverTimestamp() });
+                                    }
+                                }
+                                setLoading(false);
+                            }
+                            
+                            onSnapshot(doc(db, "users", u.uid), (docSnap) => {
+                                if (isMounted && docSnap.exists()) {
+                                    const data = docSnap.data();
+                                    if (data.isBanned) {
+                                        alert("Your account has been disabled by the admin.");
+                                        signOut(auth);
+                                    } else {
+                                        setUserData(data);
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            console.error("Error:", e);
+                            if (isMounted) setLoading(false);
+                        }
+                    } else {
+                        if (isMounted) {
+                            setUser(null);
+                            setUserData(null);
+                            setLoading(false);
+                        }
+                    }
                 });
-                return () => unsubAuth();
+                
+                return () => {
+                    isMounted = false;
+                    clearTimeout(safetyTimeout);
+                    unsubAuth();
+                };
             }, []);
 
-            if (loading) return <div className="h-screen flex items-center justify-center"><div className="loader"></div></div>;
+            if (loading) return (
+                <div className="h-screen flex flex-col items-center justify-center">
+                    <h1 className="font-insta text-4xl text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500 mb-4">Indiagram</h1>
+                    <div className="loader"></div>
+                </div>
+            );
 
             return user ? <Dashboard user={user} userData={userData} /> : <AuthPage setUser={setUser} />;
         }
