@@ -34,54 +34,137 @@
             const [error, setError] = React.useState('');
             const [loading, setLoading] = React.useState(false);
 
-            // Redirect if already logged in
+            // Redirect if already logged in (Check DB status first)
             React.useEffect(() => {
-                onAuthStateChanged(auth, (u) => { if(u) window.location.href = "home.html"; });
+                const unsub = onAuthStateChanged(auth, (u) => { 
+                    if(u) {
+                        // User is logged in, redirect to home
+                        window.location.href = "home.html";
+                    }
+                });
+                return () => unsub();
             }, []);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                setLoading(true); setError('');
+                setLoading(true); 
+                setError('');
+                
                 try {
                     if (isLogin) {
+                        // --- LOGIN LOGIC ---
                         let loginEmail = email;
+                        
+                        // Check if input is Username
                         if (!email.includes('@')) {
                             const q = query(collection(db, "users"), where("username", "==", email.toLowerCase()));
                             const snap = await getDocs(q);
                             if (snap.empty) throw new Error("Username not found.");
                             loginEmail = snap.docs[0].data().email;
                         }
+                        
                         await signInWithEmailAndPassword(auth, loginEmail, password);
-                        window.location.href = "home.html";
+                        // Redirect handled by onAuthStateChanged
+                        
                     } else {
+                        // --- SIGNUP LOGIC (Fixed) ---
+                        
+                        // 1. Check if Username Exists
                         const q = query(collection(db, "users"), where("username", "==", username.toLowerCase()));
                         const snap = await getDocs(q);
-                        if(!snap.empty) throw new Error("Username taken!");
+                        if(!snap.empty) throw new Error("Username already taken! Please choose another.");
+
+                        // 2. Create Auth User
                         const res = await createUserWithEmailAndPassword(auth, email, password);
+                        
+                        // 3. Create Database Entry (Critical Step)
+                        try {
+                            await setDoc(doc(db, "users", res.user.uid), {
+                                uid: res.user.uid, 
+                                name: name, 
+                                username: username.toLowerCase(), 
+                                email: email, 
+                                country: 'India', 
+                                bio: "Hello, I am using Indiagram!", 
+                                photoURL: "", 
+                                isVerified: false, 
+                                isBanned: false, 
+                                usernameChangeCount: 0,
+                                createdAt: serverTimestamp()
+                            });
+                        } catch (dbError) {
+                            console.error("Database Save Failed:", dbError);
+                            throw new Error("Account created but failed to save profile. Please check internet or try again.");
+                        }
+
+                        // 4. Update Auth Profile
                         await updateProfile(res.user, { displayName: name });
-                        await setDoc(doc(db, "users", res.user.uid), {
-                            uid: res.user.uid, name, username: username.toLowerCase(), email, 
-                            country: 'India', bio: "", photoURL: "", isVerified: false, isBanned: false, 
-                            createdAt: serverTimestamp()
-                        });
+                        
+                        // Success Redirect
                         window.location.href = "home.html";
                     }
-                } catch (err) { setError(err.message.replace('Firebase:', '')); setLoading(false); }
+                } catch (err) { 
+                    console.error(err);
+                    setError(err.message.replace('Firebase:', '')); 
+                    setLoading(false); 
+                }
             };
 
             return (
-                <div className="min-h-screen flex items-center justify-center p-4">
-                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border">
+                <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-purple-50 to-orange-50">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100">
                         <h1 className="font-insta text-5xl text-center mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500">Indiagram</h1>
+                        
                         <form onSubmit={handleSubmit} className="space-y-3">
-                            {!isLogin && <><input className="w-full p-2 border rounded bg-slate-50 text-sm" placeholder="Full Name" value={name} onChange={e=>setName(e.target.value)} required />
-                            <input className="w-full p-2 border rounded bg-slate-50 text-sm" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} required /></>}
-                            <input className="w-full p-2 border rounded bg-slate-50 text-sm" placeholder={isLogin ? "Email or Username" : "Email"} value={email} onChange={e=>setEmail(e.target.value)} required />
-                            <input type="password" className="w-full p-2 border rounded bg-slate-50 text-sm" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required />
-                            {error && <p className="text-red-500 text-xs text-center">{error}</p>}
-                            <button disabled={loading} className="w-full bg-blue-500 text-white py-2 rounded font-bold text-sm hover:bg-blue-600">{loading ? 'Please wait...' : (isLogin ? 'Log In' : 'Sign Up')}</button>
+                            {!isLogin && (
+                                <>
+                                    <input 
+                                        className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" 
+                                        placeholder="Full Name" 
+                                        value={name} 
+                                        onChange={e=>setName(e.target.value)} 
+                                        required 
+                                    />
+                                    <input 
+                                        className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" 
+                                        placeholder="Username (unique)" 
+                                        value={username} 
+                                        onChange={e=>setUsername(e.target.value)} 
+                                        required 
+                                    />
+                                </>
+                            )}
+                            
+                            <input 
+                                className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" 
+                                placeholder={isLogin ? "Email or Username" : "Email"} 
+                                value={email} 
+                                onChange={e=>setEmail(e.target.value)} 
+                                required 
+                            />
+                            
+                            <input 
+                                type="password" 
+                                className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" 
+                                placeholder="Password" 
+                                value={password} 
+                                onChange={e=>setPassword(e.target.value)} 
+                                required 
+                            />
+                            
+                            {error && <p className="text-red-500 text-xs text-center font-bold bg-red-50 p-2 rounded">{error}</p>}
+                            
+                            <button disabled={loading} className="w-full bg-blue-500 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-blue-600 transition disabled:opacity-50">
+                                {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
+                            </button>
                         </form>
-                        <p className="text-center text-sm mt-4">{isLogin ? "Don't have an account?" : "Have an account?"} <button onClick={()=>setIsLogin(!isLogin)} className="text-blue-500 font-bold">{isLogin ? 'Sign up' : 'Log in'}</button></p>
+                        
+                        <p className="text-center text-sm mt-6 text-slate-600">
+                            {isLogin ? "Don't have an account?" : "Have an account?"} 
+                            <button onClick={()=>{setIsLogin(!isLogin); setError('');}} className="text-blue-500 font-bold ml-1 hover:underline">
+                                {isLogin ? 'Sign up' : 'Log in'}
+                            </button>
+                        </p>
                     </div>
                 </div>
             );
