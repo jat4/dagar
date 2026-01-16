@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Indiagram</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Grand+Hotel&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style> body { font-family: 'Inter', sans-serif; background: #fafafa; } .font-insta { font-family: 'Grand Hotel', cursive; } </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, query, where, getDocs, setDoc, doc, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = { apiKey: "AIzaSyBIWFvOKLOpOFfik5YmsERR9pVLjs7tYTc", authDomain: "make-a-site.firebaseapp.com", projectId: "make-a-site", storageBucket: "make-a-site.firebasestorage.app", messagingSenderId: "1099071295300", appId: "1:1099071295300:web:c5e997a1591b9ffee55111" };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        function AuthPage() {
+            const [isLogin, setIsLogin] = React.useState(true);
+            const [email, setEmail] = React.useState('');
+            const [password, setPassword] = React.useState('');
+            const [name, setName] = React.useState('');
+            const [username, setUsername] = React.useState('');
+            const [error, setError] = React.useState('');
+            const [loading, setLoading] = React.useState(false);
+            const [isSigningUp, setIsSigningUp] = React.useState(false);
+
+            React.useEffect(() => {
+                const unsub = onAuthStateChanged(auth, async (u) => { 
+                    if(u && !isSigningUp) {
+                        // --- SECURITY CHECK: IS USER BANNED? ---
+                        try {
+                            const userDoc = await getDoc(doc(db, "users", u.uid));
+                            if (userDoc.exists() && userDoc.data().isBanned === true) {
+                                await signOut(auth); // Kick them out immediately
+                                setError("Your account has been permanently disabled by the administrator.");
+                                return;
+                            }
+                            window.location.href = "home.html";
+                        } catch (e) {
+                            console.error("Auth Check Error", e);
+                        }
+                    }
+                });
+                return () => unsub();
+            }, [isSigningUp]);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setLoading(true); 
+                setError('');
+                
+                try {
+                    if (isLogin) {
+                        let loginEmail = email;
+                        if (!email.includes('@')) {
+                            const q = query(collection(db, "users"), where("username", "==", email.toLowerCase()));
+                            const snap = await getDocs(q);
+                            if (snap.empty) throw new Error("Username not found.");
+                            loginEmail = snap.docs[0].data().email;
+                        }
+                        
+                        // Normal Login
+                        const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
+                        
+                        // DOUBLE CHECK BAN IMMEDIATELY AFTER LOGIN
+                        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
+                        if (userDoc.exists() && userDoc.data().isBanned === true) {
+                            await signOut(auth);
+                            throw new Error("Your account has been permanently disabled.");
+                        }
+
+                    } else {
+                        setIsSigningUp(true);
+                        
+                        const cleanUsername = username.toLowerCase().trim();
+                        if (!/^[a-z0-9._]+$/.test(cleanUsername)) throw new Error("Username can only contain letters, numbers, . and _");
+                        if (cleanUsername.startsWith('.') || cleanUsername.endsWith('.')) throw new Error("Username cannot start or end with a dot.");
+
+                        const q = query(collection(db, "users"), where("username", "==", cleanUsername));
+                        const snap = await getDocs(q);
+                        if(!snap.empty) throw new Error("Username already taken!");
+
+                        const res = await createUserWithEmailAndPassword(auth, email, password);
+                        
+                        try {
+                            await setDoc(doc(db, "users", res.user.uid), {
+                                uid: res.user.uid, 
+                                name: name, 
+                                username: cleanUsername, 
+                                email: email, 
+                                country: 'India', 
+                                bio: "Hello, I am using Indiagram!", 
+                                photoURL: "", 
+                                isVerified: false, 
+                                isBanned: false, 
+                                isAdmin: false,
+                                usernameChangeCount: 0,
+                                showActivityStatus: true,
+                                readReceipts: true,
+                                createdAt: serverTimestamp()
+                            });
+                        } catch (dbError) { console.error(dbError); }
+
+                        await updateProfile(res.user, { displayName: name });
+                        window.location.href = "home.html";
+                    }
+                } catch (err) { 
+                    console.error(err);
+                    setError(err.message.replace('Firebase:', '')); 
+                    setLoading(false); 
+                    setIsSigningUp(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-purple-50 to-orange-50">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100">
+                        <h1 className="font-insta text-5xl text-center mb-6 text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-orange-500">Indiagram</h1>
+                        
+                        <form onSubmit={handleSubmit} className="space-y-3">
+                            {!isLogin && (
+                                <>
+                                    <input className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" placeholder="Full Name" value={name} onChange={e=>setName(e.target.value)} required />
+                                    <input className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} required />
+                                </>
+                            )}
+                            <input className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" placeholder={isLogin ? "Email or Username" : "Email"} value={email} onChange={e=>setEmail(e.target.value)} required />
+                            <input type="password" className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-sm outline-none focus:border-slate-400" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required />
+                            
+                            {error && <p className="text-red-500 text-xs text-center font-bold bg-red-50 p-2 rounded">{error}</p>}
+                            
+                            <button disabled={loading} className="w-full bg-blue-500 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-blue-600 transition disabled:opacity-50">
+                                {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
+                            </button>
+                        </form>
+                        <p className="text-center text-sm mt-6 text-slate-600">{isLogin ? "Don't have an account?" : "Have an account?"} <button onClick={()=>{setIsLogin(!isLogin); setError('');}} className="text-blue-500 font-bold ml-1 hover:underline">{isLogin ? 'Sign up' : 'Log in'}</button></p>
+                    </div>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AuthPage />);
+    </script>
+</body>
+</html>

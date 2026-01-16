@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Messages</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Grand+Hotel&family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style> 
+        body { font-family: 'Inter', sans-serif; background: #fff; overscroll-behavior: none; }
+        .font-insta { font-family: 'Grand Hotel', cursive; }
+        .chat-scroll::-webkit-scrollbar { width: 4px; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #e5e5e5; border-radius: 4px; }
+        .bg-purple-grad { background: linear-gradient(135deg, #a855f7, #9333ea); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, query, where, getDocs, onSnapshot, addDoc, serverTimestamp, doc, getDoc, limit, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getDatabase, ref, onValue, set, remove, serverTimestamp as rtdbTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+        const firebaseConfig = { apiKey: "AIzaSyBIWFvOKLOpOFfik5YmsERR9pVLjs7tYTc", authDomain: "make-a-site.firebaseapp.com", projectId: "make-a-site", storageBucket: "make-a-site.firebasestorage.app", messagingSenderId: "1099071295300", appId: "1:1099071295300:web:c5e997a1591b9ffee55111" };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const rtdb = getDatabase(app);
+
+        const formatMessageTime = (timestamp) => {
+            if (!timestamp) return '';
+            const date = new Date(timestamp.seconds * 1000);
+            const now = new Date();
+            const isToday = date.toDateString() === now.toDateString();
+            const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+            return isToday ? `Today ${timeStr}` : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        };
+
+        function Navbar({ onLogout }) {
+            const [showSettings, setShowSettings] = React.useState(false);
+            return (
+                <nav className="bg-white border-b h-16 flex items-center justify-between px-4 sticky top-0 z-[50]">
+                    <h1 className="font-insta text-3xl cursor-pointer bg-clip-text text-transparent bg-gradient-to-r from-purple-600 to-orange-500" onClick={()=>window.location.href='home.html'}>Indiagram</h1>
+                    <div className="flex gap-4 items-center">
+                        <a href="home.html" className="material-icons-round text-3xl text-slate-600 hover:text-black">home</a>
+                        <a href="search.html" className="material-icons-round text-3xl text-slate-600 hover:text-black">search</a>
+                        <a href="message-list.html" className="material-icons-round text-3xl text-black">chat</a>
+                        <a href="notifications.html" className="material-icons-round text-3xl text-slate-600 hover:text-black">favorite_border</a>
+                        <a href="profile.html" className="material-icons-round text-3xl text-slate-600 hover:text-black">account_circle</a>
+                        <div className="relative">
+                            <button onClick={()=>setShowSettings(!showSettings)}><span className="material-icons-round text-3xl text-slate-600 hover:text-black">settings</span></button>
+                            {showSettings && (
+                                <div className="absolute right-0 top-10 bg-white border shadow-lg rounded-lg w-32 py-1 z-50">
+                                    <button onClick={onLogout} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-slate-50 font-bold">Logout</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </nav>
+            );
+        }
+
+        function ChatRoom({ currentUser, initialTargetUser, onBack }) {
+            const [text, setText] = React.useState('');
+            const [msgs, setMsgs] = React.useState([]);
+            const [targetUser, setTargetUser] = React.useState(initialTargetUser);
+            const [isTyping, setIsTyping] = React.useState(false);
+            const [isOnline, setIsOnline] = React.useState(false);
+            const messagesEndRef = React.useRef(null);
+            const [showMenu, setShowMenu] = React.useState(false);
+            
+            React.useEffect(() => {
+                const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                const q = query(collection(db, "messages"), where("chatId", "==", chatId));
+                const unsub = onSnapshot(q, async (snap) => {
+                    const m = snap.docs.map(d => {
+                        const data = d.data();
+                        if (data.receiverId === currentUser.uid && !data.read) {
+                            getDoc(doc(db, "users", currentUser.uid)).then(myDoc => {
+                                if (myDoc.exists() && myDoc.data().readReceipts !== false) {
+                                    updateDoc(d.ref, { read: true });
+                                }
+                            });
+                        }
+                        return {id:d.id, ...data};
+                    }).sort((a,b)=>(a.timestamp?.seconds||0)-(b.timestamp?.seconds||0));
+                    setMsgs(m);
+                    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                });
+                return () => unsub();
+            }, [targetUser]);
+
+            React.useEffect(() => {
+                const unsubProfile = onSnapshot(doc(db, "users", targetUser.uid), (docSnap) => { if(docSnap.exists()) setTargetUser(docSnap.data()); });
+                
+                const statusRef = ref(rtdb, '/status/' + targetUser.uid);
+                const unsubRTDB = onValue(statusRef, (snap) => {
+                    const val = snap.val();
+                    if (targetUser.showActivityStatus !== false && val?.state === 'online') {
+                        setIsOnline(true);
+                    } else {
+                        setIsOnline(false);
+                    }
+                });
+
+                const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                const typingRef = ref(rtdb, `typing/${chatId}/${targetUser.uid}`);
+                const unsubTyping = onValue(typingRef, (snap) => setIsTyping(snap.val() === true));
+
+                return () => { unsubProfile(); unsubRTDB(); unsubTyping(); };
+            }, [targetUser.uid, targetUser.showActivityStatus]);
+
+            const handleInputChange = (e) => {
+                setText(e.target.value);
+                const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                const myTypingRef = ref(rtdb, `typing/${chatId}/${currentUser.uid}`);
+                if (e.target.value.length > 0) set(myTypingRef, true); else remove(myTypingRef);
+            };
+
+            const send = async (e) => {
+                e.preventDefault();
+                if(!text.trim()) return;
+                const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                remove(ref(rtdb, `typing/${chatId}/${currentUser.uid}`));
+                await addDoc(collection(db, "messages"), { chatId, text, senderId: currentUser.uid, receiverId: targetUser.uid, read: false, timestamp: serverTimestamp() });
+                setText('');
+            }
+
+            const deleteChat = async () => {
+                if(confirm("Delete entire chat?")) {
+                    const chatId = [currentUser.uid, targetUser.uid].sort().join('_');
+                    const q = query(collection(db, "messages"), where("chatId", "==", chatId));
+                    const snap = await getDocs(q);
+                    snap.forEach(d => deleteDoc(d.ref));
+                    onBack();
+                }
+            }
+
+            const goToProfile = () => window.location.href = `profile.html?uid=${targetUser.uid}`;
+
+            return (
+                <div className="fixed inset-0 z-[100] bg-white flex flex-col h-full w-full">
+                    <div className="h-16 px-3 flex items-center justify-between bg-white shrink-0 shadow-sm z-20">
+                        <div className="flex items-center gap-3">
+                            <button onClick={onBack}><span className="material-icons-round text-3xl text-slate-800">arrow_back</span></button>
+                            <div className="relative cursor-pointer" onClick={goToProfile}>
+                                <img src={targetUser.photoURL || "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"} className="w-10 h-10 rounded-full border border-slate-200 object-cover" />
+                                {isOnline && <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>}
+                            </div>
+                            <div onClick={goToProfile} className="cursor-pointer">
+                                <p className="font-bold flex items-center gap-1 text-base leading-none">
+                                    {targetUser.name}
+                                    {targetUser.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}
+                                </p>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                    {isTyping ? "Typing..." : (isOnline ? "Active now" : `@${targetUser.username}`)}
+                                </p>
+                            </div>
+                        </div>
+                        <div className="relative">
+                            <button onClick={()=>setShowMenu(!showMenu)}><span className="material-icons-round text-slate-600 text-2xl">info_outline</span></button>
+                            {showMenu && (
+                                <div className="absolute right-0 top-10 bg-white border shadow-xl rounded-xl w-40 py-2 z-50 animate-fade-in">
+                                    <button onClick={deleteChat} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-slate-50 font-bold">Delete Chat</button>
+                                    <button onClick={()=>alert('Block logic here')} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">Block</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white chat-scroll">
+                        <div className="text-center text-xs text-slate-400 my-4">Today 6:44 PM</div>
+
+                        {msgs.map((m) => {
+                            const isMe = m.senderId === currentUser.uid;
+                            return (
+                                <div key={m.id} className={`flex items-end gap-2 mb-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                                    {!isMe && (
+                                        <img src={targetUser.photoURL || "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"} className="w-7 h-7 rounded-full object-cover border mb-1" />
+                                    )}
+                                    
+                                    <div className={`max-w-[70%] px-4 py-2.5 text-[15px] leading-relaxed shadow-sm ${
+                                        isMe 
+                                        ? 'bg-purple-grad text-white rounded-2xl rounded-tr-sm' 
+                                        : 'bg-slate-100 text-black rounded-2xl rounded-tl-sm'
+                                    }`}>
+                                        {m.text}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                        
+                        {msgs.length > 0 && msgs[msgs.length-1].senderId === currentUser.uid && msgs[msgs.length-1].read && (
+                            <div className="text-right text-[10px] text-slate-400 font-medium mr-1">Seen</div>
+                        )}
+                        
+                        <div ref={messagesEndRef} className="h-2"></div>
+                    </div>
+
+                    <form onSubmit={send} className="p-3 bg-white flex items-center gap-2 shrink-0">
+                        <div className="flex-1 bg-slate-100 rounded-full flex items-center px-4 py-2">
+                            <input 
+                                className="bg-transparent w-full outline-none text-sm placeholder-slate-500" 
+                                value={text} 
+                                onChange={handleInputChange} 
+                                placeholder="Message..." 
+                            />
+                        </div>
+                        {text.trim() ? (
+                            <button className="text-purple-600 font-bold text-sm px-2 transition hover:scale-105">Send</button>
+                        ) : (
+                            <div className="flex gap-3 px-2 text-slate-800">
+                                <span className="material-icons-round text-2xl">image</span>
+                                <span className="material-icons-round text-2xl">favorite_border</span>
+                            </div>
+                        )}
+                    </form>
+                </div>
+            )
+        }
+
+        function MessageList() {
+            const [user, setUser] = React.useState(null);
+            const [activeChat, setActiveChat] = React.useState(null);
+            const [tab, setTab] = React.useState('primary'); 
+            const [primaryChats, setPrimaryChats] = React.useState([]);
+            const [requestChats, setRequestChats] = React.useState([]);
+
+            React.useEffect(() => {
+                onAuthStateChanged(auth, async u => {
+                    if(!u) return window.location.href="index.html";
+                    
+                    // --- SECURITY CHECK FOR MESSAGES ---
+                    const myDoc = await getDoc(doc(db, "users", u.uid));
+                    if (myDoc.exists() && myDoc.data().isBanned === true) {
+                        await signOut(auth);
+                        alert("Your account has been permanently disabled.");
+                        window.location.href = "index.html";
+                        return;
+                    }
+                    // -----------------------------------
+
+                    setUser(u);
+                    
+                    const usersSnap = await getDocs(query(collection(db, "users"), limit(50)));
+                    const allUsers = usersSnap.docs.map(d => d.data()).filter(x => x.uid !== u.uid);
+                    setPrimaryChats(allUsers); 
+
+                    const params = new URLSearchParams(window.location.search);
+                    const chatWith = params.get('chatWith');
+                    if(chatWith) {
+                        const targetDoc = await getDoc(doc(db, "users", chatWith));
+                        if(targetDoc.exists()) setActiveChat(targetDoc.data());
+                    }
+                });
+            }, []);
+
+            if(!user) return <div className="p-10 text-center">Loading...</div>;
+            
+            if(activeChat) return <ChatRoom currentUser={user} initialTargetUser={activeChat} onBack={()=>{ window.history.pushState({}, document.title, window.location.pathname); setActiveChat(null); }} />;
+
+            const displayedUsers = tab === 'primary' ? primaryChats : requestChats; 
+
+            return (
+                <div className="min-h-screen bg-white">
+                    <Navbar onLogout={() => signOut(auth).then(()=>window.location.href='index.html')} />
+                    <div className="max-w-md mx-auto h-[90vh] flex flex-col">
+                        <div className="p-4 pb-2">
+                            <h2 className="font-bold text-xl mb-4">Messages</h2>
+                            <div className="flex bg-slate-100 p-1 rounded-lg mb-2">
+                                <button onClick={()=>setTab('primary')} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${tab==='primary' ? 'bg-white shadow text-black' : 'text-slate-500'}`}>Primary</button>
+                                <button onClick={()=>setTab('requests')} className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${tab==='requests' ? 'bg-white shadow text-black' : 'text-slate-500'}`}>Requests</button>
+                            </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto">
+                            {displayedUsers.length === 0 && <p className="text-center text-slate-400 mt-10 text-sm">No conversations.</p>}
+                            {displayedUsers.map(u => (
+                                <div key={u.uid} onClick={()=>setActiveChat(u)} className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer border-b">
+                                    <div className="relative">
+                                        <img src={u.photoURL || "https://upload.wikimedia.org/wikipedia/commons/7/7c/Profile_avatar_placeholder_large.png"} className="w-14 h-14 rounded-full border object-cover" />
+                                        <div className="absolute bottom-1 right-1 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="font-bold text-sm flex items-center gap-1">{u.name} {u.isVerified && <span className="material-icons-round text-blue-500 text-sm">verified</span>}</p>
+                                        <p className="text-xs text-slate-500">Tap to chat</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<MessageList />);
+    </script>
+</body>
+</html>
